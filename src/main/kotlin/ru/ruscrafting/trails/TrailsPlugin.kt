@@ -4,9 +4,11 @@ import net.coreprotect.CoreProtect
 import net.kyori.adventure.text.Component
 import org.bstats.bukkit.Metrics
 import org.bukkit.Material
+import org.bukkit.Location
 import org.bukkit.NamespacedKey
 import org.bukkit.Particle
 import org.bukkit.block.Block
+import org.bukkit.block.data.BlockData
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
@@ -17,25 +19,22 @@ import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
 import ru.ruscrafting.trails.bukkit.BukkitWalkSpeedTarget
 import ru.ruscrafting.trails.bukkit.DecayScheduler
+import ru.ruscrafting.trails.bukkit.RoadManager
+import ru.ruscrafting.trails.bukkit.RoadResult
 import ru.ruscrafting.trails.bukkit.TrailsCommand
 import ru.ruscrafting.trails.bukkit.TrailsListener
 import ru.ruscrafting.trails.bukkit.TrailToolKind
 import ru.ruscrafting.trails.config.LocaleService
 import ru.ruscrafting.trails.config.LegacyConfigMigrator
+import ru.ruscrafting.trails.config.RoadSettings
+import ru.ruscrafting.trails.config.RoadSettingsLoader
 import ru.ruscrafting.trails.config.TrailsSettings
 import ru.ruscrafting.trails.config.TrailsSettingsLoader
 import ru.ruscrafting.trails.config.YamlConfig
 import ru.ruscrafting.trails.domain.TrailCatalog
 import ru.ruscrafting.trails.integration.BukkitEventProtection
 import ru.ruscrafting.trails.integration.CoreProtectObserver
-import ru.ruscrafting.trails.integration.DecayPolicy
-import ru.ruscrafting.trails.integration.DynmapObserver
-import ru.ruscrafting.trails.integration.LandsProtection
-import ru.ruscrafting.trails.integration.LogBlockObserver
-import ru.ruscrafting.trails.integration.ProtectionPolicy
-import ru.ruscrafting.trails.integration.ReflectiveProtections
 import ru.ruscrafting.trails.integration.TrailsPlaceholderExpansion
-import ru.ruscrafting.trails.integration.WorldGuardProtection
 import ru.ruscrafting.trails.service.BlockChangeObserver
 import ru.ruscrafting.trails.service.SpeedController
 import ru.ruscrafting.trails.service.TrailService
@@ -53,20 +52,20 @@ open class TrailsPlugin : JavaPlugin() {
     private lateinit var locale: LocaleService
     private lateinit var configFile: YamlConfig
     private lateinit var trailsFile: YamlConfig
+    private lateinit var roadsFile: YamlConfig
     private lateinit var preferences: PlayerPreferencesStore
     private lateinit var blockStore: CustomBlockTrailStore
     private lateinit var trailService: TrailService
-    private var protection: ProtectionPolicy = ProtectionPolicy.ALLOW_ALL
+    private lateinit var roadSettings: RoadSettings
+    private lateinit var roadManager: RoadManager
     private val bukkitEventProtection by lazy { BukkitEventProtection(server.pluginManager) }
-    private var decayPolicy: DecayPolicy = DecayPolicy.ALLOW_ALL
-    private var worldGuard: WorldGuardProtection? = null
-    private var lands: LandsProtection? = null
     private var placeholderExpansion: TrailsPlaceholderExpansion? = null
     private val speedController = SpeedController()
     private val denyMessageCooldown = ConcurrentHashMap.newKeySet<UUID>()
     private var speedTask: BukkitTask? = null
     private var preferenceSaveTask: BukkitTask? = null
     private var decayScheduler: DecayScheduler? = null
+    private var roadExpiryTask: BukkitTask? = null
     private lateinit var commandHandler: TrailsCommand
     private var localeCommand: Command? = null
     private val toolKindKey by lazy { NamespacedKey(this, "trail_tool_kind") }
@@ -82,31 +81,14 @@ open class TrailsPlugin : JavaPlugin() {
                 particleExists = { runCatching { Particle.valueOf(it) }.isSuccess },
             ).migrateIfNeeded(configFile)
         if (migration.migrated) {
-            logger.info("Migrated legacy config.yml to schema v2; backup: ${migration.backup?.fileName}")
+            logger.info("Migrated config.yml to schema v3; backup: ${migration.backup?.fileName}")
             configFile.reload()
         }
         ensureBundledResource("trails.yml")
         trailsFile = YamlConfig(dataFolder.toPath(), "trails.yml")
-        val loadSettings = loadSettings(reload = false)
-        val loadLocale = loadLocale(loadSettings)
-        if (
-            server.pluginManager.getPlugin("WorldGuard") != null &&
-            loadSettings.integrations.worldGuardEnabled &&
-            (loadSettings.integrations.protectionMode.usesPluginApi || loadSettings.integrations.worldGuardDecayFlag)
-        ) {
-            worldGuard =
-                WorldGuardProtection(
-                    registerDecayFlag = loadSettings.integrations.worldGuardDecayFlag,
-                    checkBypass = loadSettings.integrations.worldGuardCheckBypass,
-                )
-        }
-        if (
-            loadSettings.integrations.protectionMode.usesPluginApi &&
-            loadSettings.integrations.landsEnabled &&
-            server.pluginManager.getPlugin("Lands") != null
-        ) {
-            lands = LandsProtection(this, loadSettings.integrations, loadLocale)
-        }
+        ensureBundledResource("roads.yml")
+        roadsFile = YamlConfig(dataFolder.toPath(), "roads.yml")
+        loadLocale(loadSettings(reload = false))
     }
 
     override fun onEnable() {
@@ -116,8 +98,12 @@ open class TrailsPlugin : JavaPlugin() {
             }
         blockStore = CustomBlockTrailStore(this)
         val loadedSettings = loadSettings(reload = true)
+        val loadedRoadSettings = loadRoadSettings(reload = true, trailsSettings = loadedSettings)
         val loadedLocale = loadLocale(loadedSettings)
         applyRuntime(loadedSettings, loadedLocale)
+        roadSettings = loadedRoadSettings
+        roadManager = RoadManager(this, loadedRoadSettings)
+        roadExpiryTask = server.scheduler.runTaskTimer(this, Runnable(roadManager::expireSessions), 20L, 20L)
         runCatching { Metrics(this, BSTATS_PLUGIN_ID) }
             .onFailure { logger.warning("bStats could not initialize and will be skipped: ${it.message}") }
 
@@ -131,11 +117,14 @@ open class TrailsPlugin : JavaPlugin() {
         if (server.pluginManager.isPluginEnabled("PlaceholderAPI")) {
             placeholderExpansion = TrailsPlaceholderExpansion(this).also { check(it.register()) { "Could not register PlaceholderAPI expansion" } }
         }
-        logger.info("Trails ${pluginMeta.version} enabled with ${settings.definitions.size} trail definitions (roads excluded)")
+        logger.info("Trails ${pluginMeta.version} enabled with ${settings.definitions.size} trail definitions")
     }
 
     override fun onDisable() {
         restoreAllSpeeds()
+        if (::roadManager.isInitialized) roadManager.close()
+        roadExpiryTask?.cancel()
+        roadExpiryTask = null
         cancelRuntimeTasks()
         if (::preferences.isInitialized) {
             runCatching { preferences.close() }.onFailure { logger.severe("Could not save players.yml: ${it.message}") }
@@ -149,8 +138,11 @@ open class TrailsPlugin : JavaPlugin() {
     fun reloadTrails(): Result<Unit> =
         runCatching {
             val loadedSettings = loadSettings(reload = true)
+            val loadedRoadSettings = loadRoadSettings(reload = true, trailsSettings = loadedSettings)
             val loadedLocale = loadLocale(loadedSettings)
             applyRuntime(loadedSettings, loadedLocale)
+            roadSettings = loadedRoadSettings
+            roadManager.reconfigure(loadedRoadSettings)
             if (::commandHandler.isInitialized) syncLocaleCommand()
             logger.info("Trails configuration reloaded")
         }.onFailure { error ->
@@ -160,6 +152,7 @@ open class TrailsPlugin : JavaPlugin() {
     fun validateConfiguration(): Result<TrailsSettings> =
         runCatching {
             val loadedSettings = loadSettings(reload = true)
+            loadRoadSettings(reload = true, trailsSettings = loadedSettings)
             loadLocale(loadedSettings)
             loadedSettings
         }
@@ -170,6 +163,7 @@ open class TrailsPlugin : JavaPlugin() {
                 "%version%" to pluginMeta.version,
                 "%config-version%" to settings.configVersion.toString(),
                 "%trails-version%" to settings.trailsConfigVersion.toString(),
+                "%roads-version%" to roadSettings.configVersion.toString(),
                 "%locale-format%" to locale.formatName,
                 "%worlds%" to settings.worldSummary(),
                 "%trail-count%" to settings.definitions.size.toString(),
@@ -185,7 +179,11 @@ open class TrailsPlugin : JavaPlugin() {
         ).forEach { message(sender, it, replacements) }
     }
 
-    fun handleMovement(player: Player, block: Block) {
+    fun handleMovement(
+        player: Player,
+        block: Block,
+        createTrail: Boolean = true,
+    ) {
         if (!settings.worldEnabled(player.world.name)) {
             restoreSpeed(player)
             return
@@ -203,27 +201,73 @@ open class TrailsPlugin : JavaPlugin() {
             restoreSpeed(player)
         }
 
+        if (!createTrail) return
         if (settings.sneakBypass && player.isSneaking) return
         if (!trailService.canAffect(block)) return
         val canCreate =
             if (settings.usePermissionForTrails) player.hasPermission("trails.create-trails") else trailsEnabled(player.uniqueId)
-        if (!canCreate || !checkPluginProtection(player, block)) return
+        if (!canCreate) return
         trailService.walk(player, block, settings.runModifier) { target ->
             checkEventProtection(player, block, target)
         }
     }
 
+    fun captureRoadMovement(
+        player: Player,
+        location: Location,
+    ): Boolean = roadManager.capture(player, location)
+
+    fun roadProfiles(): Collection<String> = roadManager.profiles()
+
+    fun roadStart(
+        player: Player,
+        profile: String,
+    ): RoadResult = roadManager.start(player, profile)
+
+    fun roadCommit(player: Player): RoadResult = roadManager.commit(player)
+
+    fun roadCancel(player: Player): RoadResult = roadManager.cancel(player)
+
+    fun roadUndo(player: Player): RoadResult = roadManager.undo(player)
+
+    fun roadStatus(player: Player): RoadResult = roadManager.status(player)
+
+    fun discardRoadSession(player: Player) = roadManager.discard(player)
+
+    fun canRoadChange(
+        player: Player,
+        block: Block,
+        target: Material,
+    ): Boolean =
+        checkProtectionResult(
+            player,
+            bukkitEventProtection.canChange(player, block, target, settings.integrations.blockPlaceCompatibilityEvent),
+        )
+
+    fun placeRoad(
+        actor: String,
+        block: Block,
+        after: BlockData,
+    ): TrailBlockState? = trailService.placeRoad(actor, block, after)
+
+    fun restoreRoad(
+        actor: String,
+        block: Block,
+        before: BlockData,
+        previous: TrailBlockState?,
+    ) = trailService.restoreRoad(actor, block, before, previous)
+
     fun forceTrail(player: Player, block: Block) {
         if (!settings.worldEnabled(block.world.name) || !trailService.canAffect(block)) return
         val bypass = player.hasPermission("trails.trail-tool.bypass-protection")
-        if (!bypass && !checkPluginProtection(player, block)) return
         trailService.walk(player, block, settings.runModifier, forced = true) { target ->
             bypass || checkEventProtection(player, block, target)
         }
     }
 
     fun decayBlock(block: Block): Boolean =
-        settings.worldEnabled(block.world.name) && decayPolicy.canDecay(block.location) && trailService.decay(block, settings.stepDecayFraction)
+        settings.worldEnabled(block.world.name) &&
+            trailService.decay(block, settings.stepDecayFraction) { target -> bukkitEventProtection.canDecay(block, target) }
 
     fun clearTrailData(block: Block) = trailService.clear(block)
 
@@ -354,9 +398,18 @@ open class TrailsPlugin : JavaPlugin() {
             commandName = settings.commandAlias ?: "trails",
         )
 
+    private fun loadRoadSettings(
+        reload: Boolean,
+        trailsSettings: TrailsSettings,
+    ): RoadSettings {
+        if (reload) roadsFile.reload()
+        return RoadSettingsLoader.load(
+            roadsFile,
+            trailsSettings.definitions.flatMap { definition -> definition.stages.map { it.material } }.toSet(),
+        )
+    }
+
     private fun applyRuntime(newSettings: TrailsSettings, newLocale: LocaleService) {
-        val newWorldGuard = worldGuard
-        val newProtection = createProtectionPolicy(newSettings, newWorldGuard)
         val newObserver = createObserver(newSettings)
         val newTrailService =
             TrailService(
@@ -365,46 +418,12 @@ open class TrailsPlugin : JavaPlugin() {
                 observer = newObserver,
             )
 
-        newWorldGuard?.reconfigure(
-            newSettings.integrations.worldGuardCheckBypass,
-            newSettings.integrations.worldGuardDecayFlag,
-        )
-        lands?.reconfigure(newSettings.integrations, newLocale)
         if (::settings.isInitialized) restoreAllSpeeds()
         cancelRuntimeTasks()
         settings = newSettings
         locale = newLocale
-        protection = newProtection
-        decayPolicy = if (newSettings.integrations.worldGuardEnabled) newWorldGuard ?: DecayPolicy.ALLOW_ALL else DecayPolicy.ALLOW_ALL
         trailService = newTrailService
         scheduleRuntimeTasks()
-    }
-
-    private fun createProtectionPolicy(
-        settings: TrailsSettings,
-        worldGuard: WorldGuardProtection?,
-    ): ProtectionPolicy {
-        if (!settings.integrations.protectionMode.usesPluginApi) return ProtectionPolicy.ALLOW_ALL
-        val manager = server.pluginManager
-        val policies = mutableListOf<ProtectionPolicy>()
-        if (settings.integrations.townyEnabled) {
-            manager.enabledPlugin("Towny")?.let { policies += ReflectiveProtections.towny(it, settings.integrations) }
-        }
-        if (settings.integrations.landsEnabled && manager.isPluginEnabled("Lands")) {
-            policies += checkNotNull(lands) { "Lands integration was enabled after onLoad; restart is required" }
-        }
-        if (settings.integrations.griefPreventionEnabled) {
-            manager.enabledPlugin("GriefPrevention")?.let {
-                policies += ReflectiveProtections.griefPrevention(it, settings.integrations.griefPreventionPathsInWilderness)
-            }
-        }
-        if (settings.integrations.worldGuardEnabled && manager.isPluginEnabled("WorldGuard")) {
-            policies += checkNotNull(worldGuard) { "WorldGuard integration was enabled after onLoad; restart is required" }
-        }
-        if (settings.integrations.playerPlotEnabled) manager.enabledPlugin("PlayerPlot")?.let { policies += ReflectiveProtections.playerPlot(it) }
-        if (settings.integrations.redProtectEnabled) manager.enabledPlugin("RedProtect")?.let { policies += ReflectiveProtections.redProtect(it) }
-        if (settings.integrations.residenceEnabled) manager.enabledPlugin("Residence")?.let { policies += ReflectiveProtections.residence(it) }
-        return ProtectionPolicy.composite(policies)
     }
 
     private fun createObserver(settings: TrailsSettings): BlockChangeObserver {
@@ -413,12 +432,6 @@ open class TrailsPlugin : JavaPlugin() {
             (server.pluginManager.enabledPlugin("CoreProtect") as? CoreProtect)?.let { coreProtect ->
                 addObserver(observers, "CoreProtect") { CoreProtectObserver(coreProtect) }
             }
-        }
-        if (settings.integrations.logBlockChanges) {
-            server.pluginManager.enabledPlugin("LogBlock")?.let { addObserver(observers, "LogBlock") { LogBlockObserver(it) } }
-        }
-        if (settings.integrations.dynmapRender) {
-            server.pluginManager.enabledPlugin("dynmap", "Dynmap")?.let { addObserver(observers, "Dynmap") { DynmapObserver(it) } }
         }
         return BlockChangeObserver.composite(observers)
     }
@@ -457,7 +470,15 @@ open class TrailsPlugin : JavaPlugin() {
                 settings.saveIntervalMinutes * 60L * 20L,
                 settings.saveIntervalMinutes * 60L * 20L,
             )
-        if (settings.trailDecay) decayScheduler = DecayScheduler(this, settings, trailService, decayPolicy)
+        if (settings.trailDecay) {
+            decayScheduler =
+                DecayScheduler(
+                    this,
+                    settings,
+                    trailService,
+                    canChange = { block, target -> bukkitEventProtection.canDecay(block, target) },
+                )
+        }
     }
 
     private fun cancelRuntimeTasks() {
@@ -474,17 +495,20 @@ open class TrailsPlugin : JavaPlugin() {
         speedController.restoreAll(online)
     }
 
-    private fun checkPluginProtection(player: Player, block: Block): Boolean =
-        !settings.integrations.protectionMode.usesPluginApi ||
-            checkProtectionResult(player, protection.canCreate(player, block.location))
-
     private fun checkEventProtection(
         player: Player,
         block: Block,
         target: Material,
     ): Boolean =
-        !settings.integrations.protectionMode.usesBukkitEvent ||
-            checkProtectionResult(player, bukkitEventProtection.canChange(player, block, target))
+        checkProtectionResult(
+            player,
+            bukkitEventProtection.canChange(
+                player,
+                block,
+                target,
+                settings.integrations.blockPlaceCompatibilityEvent,
+            ),
+        )
 
     private fun checkProtectionResult(player: Player, allowed: Boolean): Boolean {
         if (allowed) return true
@@ -539,17 +563,8 @@ open class TrailsPlugin : JavaPlugin() {
             }
         val configured = settings.integrations
         return listOf(
-            "Protection=${configured.protectionMode.name.lowercase().replace('_', '-')}",
-            "Towny=${state(configured.protectionMode.usesPluginApi && configured.townyEnabled, "Towny")}",
-            "Lands=${state(configured.protectionMode.usesPluginApi && configured.landsEnabled, "Lands")}",
-            "GriefPrevention=${state(configured.protectionMode.usesPluginApi && configured.griefPreventionEnabled, "GriefPrevention")}",
-            "WorldGuard=${state(configured.protectionMode.usesPluginApi && configured.worldGuardEnabled, "WorldGuard")}",
+            "Protection=events${if (configured.blockPlaceCompatibilityEvent) "+place" else ""}",
             "CoreProtect=${state(configured.coreProtectChanges, "CoreProtect")}",
-            "LogBlock=${state(configured.logBlockChanges, "LogBlock")}",
-            "PlayerPlot=${state(configured.protectionMode.usesPluginApi && configured.playerPlotEnabled, "PlayerPlot")}",
-            "RedProtect=${state(configured.protectionMode.usesPluginApi && configured.redProtectEnabled, "RedProtect")}",
-            "Residence=${state(configured.protectionMode.usesPluginApi && configured.residenceEnabled, "Residence")}",
-            "Dynmap=${state(configured.dynmapRender, "dynmap", "Dynmap")}",
             "PlaceholderAPI=${state(true, "PlaceholderAPI")}",
         ).joinToString(", ")
     }
@@ -563,7 +578,7 @@ open class TrailsPlugin : JavaPlugin() {
     ) : Command(name) {
         init {
             description = "Configure trail creation and trail speed boost."
-            usage = "/$name [on|off|boost|show|reload|status|validate|give]"
+            usage = "/$name [on|off|boost|show|reload|status|validate|give|road]"
         }
 
         override fun execute(

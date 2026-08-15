@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.0.2"
+version = "2.1.0"
 
 repositories {
     mavenCentral()
@@ -22,10 +22,6 @@ repositories {
             includeGroup("net.md-5")
         }
     }
-    maven("https://maven.enginehub.org/repo/") {
-        name = "EngineHub"
-        content { includeGroupByRegex("com\\.sk89q(\\..*)?") }
-    }
     maven("https://repo.extendedclip.com/releases/") {
         name = "PlaceholderAPI"
         content { includeGroup("me.clip") }
@@ -33,10 +29,6 @@ repositories {
     maven("https://maven.playpro.com/") {
         name = "CoreProtect"
         content { includeGroup("net.coreprotect") }
-    }
-    maven("https://jitpack.io") {
-        name = "JitPackLandsAPI"
-        content { includeGroup("com.github.angeschossen") }
     }
 }
 
@@ -46,8 +38,6 @@ dependencies {
     implementation(libs.custom.block.data)
     implementation(libs.bstats.bukkit)
 
-    compileOnly(libs.lands.api)
-    compileOnly(libs.worldguard.bukkit)
     compileOnly(libs.coreprotect)
     compileOnly(libs.placeholder.api)
 
@@ -57,10 +47,12 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.mockbukkit)
     testImplementation(libs.placeholder.api)
-    testRuntimeOnly(libs.lands.api)
-    testRuntimeOnly(libs.worldguard.bukkit)
     testRuntimeOnly(libs.coreprotect)
     testRuntimeOnly(libs.junit.platform.launcher)
+}
+
+dependencyLocking {
+    lockAllConfigurations()
 }
 
 java {
@@ -124,7 +116,7 @@ tasks.build {
     dependsOn(tasks.shadowJar)
 }
 
-val verifyPluginArtifact by tasks.registering {
+val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
     group = "verification"
     description = "Verifies the deployable Trails shadow JAR contract."
     dependsOn(tasks.shadowJar)
@@ -139,6 +131,7 @@ val verifyPluginArtifact by tasks.registering {
                 "plugin.yml",
                 "config.yml",
                 "trails.yml",
+                "roads.yml",
                 "lang/en-US.yml",
                 "lang/ru-RU.yml",
                 "lang/zh-CN.yml",
@@ -153,8 +146,6 @@ val verifyPluginArtifact by tasks.registering {
         check(
             entries.none {
                 it.startsWith("net/coreprotect/") ||
-                    it.startsWith("com/sk89q/") ||
-                    it.startsWith("me/angeschossen/") ||
                     it.startsWith("me/clip/")
             },
         ) {
@@ -163,12 +154,12 @@ val verifyPluginArtifact by tasks.registering {
         check(entries.none { it.startsWith("com/jeff_media/") || it.startsWith("org/bstats/") }) {
             "Runtime libraries must be relocated"
         }
-        check(entries.none { it.startsWith("me/ccrama/") || "/roads/" in it.lowercase() }) {
-            "Legacy Java or roads classes leaked into the artifact"
+        check(entries.none { it.startsWith("me/ccrama/") }) {
+            "Legacy Java classes leaked into the artifact"
         }
         val descriptor = zipTree(jar).matching { include("plugin.yml") }.singleFile.readText()
         check("main: ru.ruscrafting.trails.TrailsPlugin" in descriptor)
-        check("version: \"2.0.2\"" in descriptor)
+        check("version: \"2.1.0\"" in descriptor)
         val mainClass = zipTree(jar).matching { include("ru/ruscrafting/trails/TrailsPlugin.class") }.singleFile.readBytes()
         val classMajorVersion = ((mainClass[6].toInt() and 0xff) shl 8) or (mainClass[7].toInt() and 0xff)
         check(classMajorVersion == 65) { "TrailsPlugin.class must target Java 21 (major 65), found $classMajorVersion" }

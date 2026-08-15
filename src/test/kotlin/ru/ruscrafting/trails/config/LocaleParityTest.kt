@@ -16,16 +16,12 @@ class LocaleParityTest :
                 val chinese = YamlConfig(folder, "lang/zh-CN.yml")
 
                 russian.keys("messages") shouldContainExactlyInAnyOrder english.keys("messages")
-                russian.keys("lands.flag") shouldContainExactlyInAnyOrder english.keys("lands.flag")
                 chinese.keys("messages") shouldContainExactlyInAnyOrder english.keys("messages")
-                chinese.keys("lands.flag") shouldContainExactlyInAnyOrder english.keys("lands.flag")
                 russian.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
                 chinese.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
 
                 val locale = LocaleService.load(folder, "ru-RU", "trails")
                 locale.formatName shouldBe "minimessage"
-                locale.landsDisplayName shouldBe "§6Создание троп"
-                locale.landsDescription.all { '&' !in it } shouldBe true
                 locale.renderLegacy("messages.toggledOnOther", mapOf("%name%" to "<red>Игрок")) shouldContain "<red>Игрок"
             } finally {
                 folder.toFile().deleteRecursively()

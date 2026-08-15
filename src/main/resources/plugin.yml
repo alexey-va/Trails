@@ -6,21 +6,12 @@ api-version: "1.21.11"
 authors: [j10max, ccrama, drkmatr1984, Mr-Deej, GrocerMC, alexey-va]
 website: https://github.com/alexey-va/Trails
 softdepend:
-  - Lands
-  - WorldGuard
   - CoreProtect
   - PlaceholderAPI
-  - Towny
-  - GriefPrevention
-  - PlayerPlot
-  - RedProtect
-  - Residence
-  - LogBlock
-  - Dynmap
 commands:
   trails:
     description: Configure trail creation and trail speed boost.
-    usage: /trails [on|off|boost|show|reload|status|validate|give]
+    usage: /trails [on|off|boost|show|reload|status|validate|give|road]
     aliases: [paths]
 permissions:
   trails.toggle:
@@ -65,9 +56,6 @@ permissions:
   trails.info-tool:
     description: Inspect trail metadata with the configured tool.
     default: true
-  trails.towny.town:
-    description: Create trails in the player's home town when Towny permission mode is enabled.
-    default: false
-  trails.towny.nation:
-    description: Create trails in the player's home nation when Towny permission mode is enabled.
-    default: false
+  trails.roads.manage:
+    description: Preview, commit, cancel, and undo Roads plans.
+    default: op

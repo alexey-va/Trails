@@ -17,7 +17,7 @@ import ru.ruscrafting.trails.TrailsPlugin
 class TrailsListener(
     private val plugin: TrailsPlugin,
 ) : Listener {
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onMove(event: PlayerMoveEvent) {
         val to = event.to
         val from = event.from
@@ -27,18 +27,26 @@ class TrailsListener(
         ) {
             return
         }
-        plugin.handleMovement(event.player, from.clone().subtract(0.0, 0.1, 0.0).block)
+        val capturingRoad = plugin.captureRoadMovement(event.player, to)
+        plugin.handleMovement(event.player, from.clone().subtract(0.0, 0.1, 0.0).block, createTrail = !capturingRoad)
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onBreak(event: BlockBreakEvent) {
-        plugin.clearTrailData(event.block)
+        val block = event.block
+        val before = plugin.inspectTrail(block) ?: return
+        plugin.server.scheduler.runTask(
+            plugin,
+            Runnable {
+                if (plugin.inspectTrail(block) == before) plugin.clearTrailData(block)
+            },
+        )
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onSpread(event: BlockSpreadEvent) {
         if (event.newState.type == Material.GRASS_BLOCK && plugin.inspectTrail(event.block) != null) {
-            plugin.decayBlock(event.block)
+            event.isCancelled = plugin.decayBlock(event.block)
         }
     }
 
@@ -64,11 +72,13 @@ class TrailsListener(
 
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
+        plugin.discardRoadSession(event.player)
         plugin.restoreSpeed(event.player)
     }
 
     @EventHandler(ignoreCancelled = true)
     fun onTeleport(event: PlayerTeleportEvent) {
+        plugin.discardRoadSession(event.player)
         plugin.restoreSpeed(event.player)
     }
 }

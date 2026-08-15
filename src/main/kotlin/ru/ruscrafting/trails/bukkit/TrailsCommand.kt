@@ -26,6 +26,7 @@ class TrailsCommand(
             "status" -> status(sender, args.size)
             "validate" -> validate(sender, args.size)
             "give" -> give(sender, args.drop(1))
+            "road" -> road(sender, args.drop(1))
             else -> if (args.size == 1) toggleOther(sender, args[0]) else plugin.message(sender, "messages.wrongArgs")
         }
         return true
@@ -48,6 +49,7 @@ class TrailsCommand(
                         if (sender.hasPermission("trails.status")) add("status")
                         if (sender.hasPermission("trails.validate")) add("validate")
                         if (sender.hasPermission("trails.tools.give")) add("give")
+                        if (sender.hasPermission("trails.roads.manage")) add("road")
                         if (sender.hasPermission("trails.other")) addAll(otherPlayers(sender))
                     }
                 2 ->
@@ -56,13 +58,22 @@ class TrailsCommand(
                         "boost" -> listOf("on", "off") + if (sender.hasPermission("trails.toggle-boost.other")) otherPlayers(sender) else emptyList()
                         "show" -> listOf("30")
                         "give" -> if (sender.hasPermission("trails.tools.give")) TrailToolKind.entries.map { it.id } else emptyList()
+                        "road" -> if (sender.hasPermission("trails.roads.manage")) listOf("start", "commit", "cancel", "undo", "status") else emptyList()
                         else -> emptyList()
                     }
                 3 ->
                     when {
                         args[0].equals("boost", true) && sender.hasPermission("trails.toggle-boost.other") -> otherPlayers(sender)
                         args[0].equals("give", true) && sender.hasPermission("trails.tools.give") -> plugin.server.onlinePlayers.map(Player::getName)
+                        args[0].equals("road", true) && args[1].equals("start", true) -> plugin.roadProfiles().toList()
+                        args[0].equals("road", true) -> plugin.server.onlinePlayers.map(Player::getName)
                         else -> emptyList()
+                    }
+                4 ->
+                    if (args[0].equals("road", true) && args[1].equals("start", true)) {
+                        plugin.server.onlinePlayers.map(Player::getName)
+                    } else {
+                        emptyList()
                     }
                 else -> emptyList()
             }
@@ -223,6 +234,51 @@ class TrailsCommand(
         plugin.message(sender, "messages.toolGiven", replacements)
         if (target !== sender) plugin.message(target, "messages.toolReceived", replacements)
     }
+
+    private fun road(sender: CommandSender, args: List<String>) {
+        if (!sender.hasPermission("trails.roads.manage")) return plugin.message(sender, "messages.noPerm")
+        val action = args.firstOrNull()?.lowercase() ?: return plugin.message(sender, "messages.wrongArgs")
+        val target =
+            when (action) {
+                "start" -> {
+                    if (args.size !in 2..3) return plugin.message(sender, "messages.wrongArgs")
+                    roadTarget(sender, args.getOrNull(2)) ?: return
+                }
+                "commit", "cancel", "undo", "status" -> {
+                    if (args.size !in 1..2) return plugin.message(sender, "messages.wrongArgs")
+                    roadTarget(sender, args.getOrNull(1)) ?: return
+                }
+                else -> return plugin.message(sender, "messages.wrongArgs")
+            }
+        val result =
+            when (action) {
+                "start" -> plugin.roadStart(target, args[1])
+                "commit" -> plugin.roadCommit(target)
+                "cancel" -> plugin.roadCancel(target)
+                "undo" -> plugin.roadUndo(target)
+                else -> plugin.roadStatus(target)
+            }
+        plugin.message(sender, result.message, result.replacements + ("%name%" to target.name))
+        if (target !== sender && action != "status") {
+            plugin.message(target, result.message, result.replacements + ("%name%" to target.name))
+        }
+    }
+
+    private fun roadTarget(
+        sender: CommandSender,
+        name: String?,
+    ): Player? =
+        when {
+            name != null ->
+                plugin.server.getPlayerExact(name).also {
+                    if (it == null) plugin.message(sender, "messages.playerNotOnline", mapOf("%name%" to name))
+                }
+            sender is Player -> sender
+            else -> {
+                plugin.message(sender, "messages.consoleSpecify")
+                null
+            }
+        }
 
     private fun otherPlayers(sender: CommandSender): List<String> =
         plugin.server.onlinePlayers.filter { it !== sender }.map(Player::getName)

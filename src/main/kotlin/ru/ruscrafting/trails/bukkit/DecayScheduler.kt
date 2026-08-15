@@ -2,10 +2,10 @@ package ru.ruscrafting.trails.bukkit
 
 import org.bukkit.block.Block
 import org.bukkit.entity.Player
+import org.bukkit.Material
 import org.bukkit.plugin.Plugin
 import org.bukkit.scheduler.BukkitTask
 import ru.ruscrafting.trails.config.TrailsSettings
-import ru.ruscrafting.trails.integration.DecayPolicy
 import ru.ruscrafting.trails.service.TrailService
 import kotlin.math.floor
 import kotlin.random.Random
@@ -14,7 +14,7 @@ class DecayScheduler(
     private val plugin: Plugin,
     private val settings: TrailsSettings,
     private val trailService: TrailService,
-    private val decayPolicy: DecayPolicy,
+    private val canChange: (Block, Material) -> Boolean = { _, _ -> true },
     private val random: Random = Random.Default,
 ) : AutoCloseable {
     private val task: BukkitTask =
@@ -38,7 +38,7 @@ class DecayScheduler(
                 val count = sampleSize(candidates.size, settings.decayFraction, random.nextDouble())
                 candidates.shuffled(random).take(count).forEach { block ->
                     if (nearPlayer(block, playersByWorld[world].orEmpty())) return@forEach
-                    if (decayPolicy.canDecay(block.location)) trailService.decay(block, settings.stepDecayFraction)
+                    trailService.decay(block, settings.stepDecayFraction) { target -> canChange(block, target) }
                 }
             }
         }

@@ -19,22 +19,26 @@ class LegacyConfigMigrator(
     private val particleExists: (String) -> Boolean,
 ) {
     fun migrateIfNeeded(config: YamlConfig): ConfigMigrationResult {
-        if (config.existsExplicitly("config-version")) return ConfigMigrationResult(migrated = false)
+        val explicitVersion = config.value("config-version").takeIf { config.existsExplicitly("config-version") }
+        if (explicitVersion != null) {
+            val version =
+                when (explicitVersion) {
+                    is Number -> explicitVersion.toDouble().takeIf { it.isFinite() && it % 1.0 == 0.0 }?.toInt()
+                    else -> explicitVersion.toString().toIntOrNull()
+                }
+            return if (version == 2) migrateV2(config) else ConfigMigrationResult(migrated = false)
+        }
 
         val legacy = LegacyTrailsSettingsLoader.load(config, materialExists, particleExists)
         val locale = YamlConfig(dataFolder, "lang/${legacy.language}.yml")
         val requestedAlias = locale.string("command-name", "trails").trim().lowercase()
         val commandAlias = requestedAlias.takeUnless { it.isBlank() || it == "trails" || it == "paths" }
-        val landsIcon =
-            locale.string("lands.flag.icon-material", "DIRT_PATH").trim().uppercase()
-                .takeIf(materialExists) ?: "DIRT_PATH"
 
         val migrated =
             legacy.copy(
                 configVersion = TrailsSettingsLoader.CONFIG_VERSION,
                 trailsConfigVersion = TrailsSettingsLoader.TRAILS_CONFIG_VERSION,
                 commandAlias = commandAlias,
-                integrations = legacy.integrations.copy(landsFlagIconMaterial = landsIcon),
             )
         val configDocument = configDocument(migrated)
         val trailsDocument = trailsDocument(migrated.definitions)
@@ -50,6 +54,56 @@ class LegacyConfigMigrator(
         writeAtomic(trailsPath, trailsDocument)
         writeAtomic(configPath, configDocument)
         return ConfigMigrationResult(migrated = true, backup = configBackup)
+    }
+
+    private fun migrateV2(config: YamlConfig): ConfigMigrationResult {
+        val migrated = bundledYaml("config.yml")
+        val preservedPaths =
+            listOf(
+                "locale",
+                "commands.localized-alias",
+                "player-defaults.trails-enabled",
+                "player-defaults.speed-boost-enabled",
+                "worlds.mode",
+                "worlds.names",
+                "trail-creation.while-sneaking",
+                "trail-creation.sprint-progress-multiplier",
+                "trail-creation.require-permission",
+                "trail-creation.strict-stage-order",
+                "trail-creation.visualization-particle",
+                "speed-boost.require-permission",
+                "speed-boost.only-created-trails",
+                "speed-boost.update-interval-ticks",
+                "speed-boost.adjustment-step",
+                "speed-boost.remove-immediately-off-trail",
+                "tools.advance",
+                "tools.inspect",
+                "decay.enabled",
+                "decay.interval-ticks",
+                "decay.chunk-selection-chance-percent",
+                "decay.blocks-per-chunk-percent",
+                "decay.minimum-player-distance-blocks",
+                "decay.step-counter-reduction-percent",
+                "messages.protection-denied.enabled",
+                "messages.protection-denied.cooldown-seconds",
+                "storage.player-preferences-save-interval-minutes",
+            )
+        preservedPaths.forEach { path -> config.value(path)?.let { migrated.set(path, it) } }
+        migrated.set(
+            "integrations.coreprotect.log-block-changes",
+            config.value("integrations.coreprotect.log-block-changes") ?: true,
+        )
+        val configDocument = migrated.saveToString()
+        val trailsPath = dataFolder.resolve("trails.yml")
+        val trailsDocument =
+            if (Files.exists(trailsPath)) Files.readString(trailsPath, StandardCharsets.UTF_8) else bundledYaml("trails.yml").saveToString()
+        validateDocuments(configDocument, trailsDocument)
+
+        val configPath = dataFolder.resolve("config.yml")
+        val backup = dataFolder.resolve("config.v2.backup.yml")
+        if (!Files.exists(backup)) Files.copy(configPath, backup)
+        writeAtomic(configPath, configDocument)
+        return ConfigMigrationResult(migrated = true, backup = backup)
     }
 
     private fun validateDocuments(configDocument: String, trailsDocument: String) {
@@ -99,25 +153,8 @@ class LegacyConfigMigrator(
             set("messages.protection-denied.cooldown-seconds", settings.denyMessageIntervalSeconds)
             set("storage.player-preferences-save-interval-minutes", settings.saveIntervalMinutes)
             with(settings.integrations) {
-                set("integrations.protection.mode", "plugin-api")
-                set("integrations.towny.enabled", townyEnabled)
-                set("integrations.towny.allow-in-wilderness", townyPathsInWilderness)
-                set("integrations.towny.permission-mode", townyPermissionMode)
-                set("integrations.lands.enabled", landsEnabled)
-                set("integrations.lands.allow-in-wilderness", landsPathsInWilderness)
-                set("integrations.lands.apply-flag-to-subareas", landsApplyInSubAreas)
-                set("integrations.lands.flag-icon-material", landsFlagIconMaterial)
-                set("integrations.griefprevention.enabled", griefPreventionEnabled)
-                set("integrations.griefprevention.allow-in-wilderness", griefPreventionPathsInWilderness)
-                set("integrations.worldguard.enabled", worldGuardEnabled)
-                set("integrations.worldguard.allow-bypass", worldGuardCheckBypass)
-                set("integrations.worldguard.register-decay-flag", worldGuardDecayFlag)
-                set("integrations.logblock.log-block-changes", logBlockChanges)
+                set("integrations.protection-events.block-place-compatibility", true)
                 set("integrations.coreprotect.log-block-changes", coreProtectChanges)
-                set("integrations.playerplot.enabled", playerPlotEnabled)
-                set("integrations.redprotect.enabled", redProtectEnabled)
-                set("integrations.residence.enabled", residenceEnabled)
-                set("integrations.dynmap.trigger-render", dynmapRender)
             }
         }.saveToString()
 

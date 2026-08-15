@@ -1,0 +1,26 @@
+# Roads are opt-in: a permitted builder previews a route while walking and commits it explicitly.
+config-version: 1
+enabled: false
+
+# Empty means every world. Production should use an explicit test/build world allowlist.
+worlds: []
+
+limits:
+  max-planned-blocks: 256
+  preview-expiry-seconds: 300
+  surface-search-depth: 2
+
+# Roads only repaint these safe surface blocks. Containers, ores, structures, liquids, and air are never selected.
+replaceable-materials:
+  - GRASS_BLOCK
+  - DIRT
+  - COARSE_DIRT
+  - ROOTED_DIRT
+  - PODZOL
+  - MYCELIUM
+  - DIRT_PATH
+
+profiles:
+  rustic:
+    # Left edge, center, right edge. Width must be odd and no greater than 7.
+    lanes: [COARSE_DIRT, DIRT_PATH, COARSE_DIRT]

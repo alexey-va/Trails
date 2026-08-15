@@ -10,14 +10,15 @@ Kotlin/Paper rewrite of the owner-maintained Trails plugin.
   dependency despite its small runtime footprint because public CI and contributors cannot resolve it.
 - Keep domain decisions independent of Bukkit. Bukkit listeners adapt events into the domain engine.
 - Preserve `config.yml`, `players.yml`, locale keys, `trails:w`, and `trails:n` migration compatibility.
-- The experimental road editor/template subsystem is excluded from 2.0 and must not be reintroduced incidentally.
+- Do not restore the legacy road template/editor subsystem. Roads 2.1 is a separate bounded preview/commit workflow:
+  client-only preview, safe surface allowlist, exact preflight, rollback, and conflict-safe persisted undo.
 
 ## Tests
 
 - Kotlin tests use Kotest and MockK; platform lifecycle tests may use MockBukkit.
 - No ignored or disabled tests.
-- Cover parser validation, progression, decay, speed restoration, protection composition, persistence migration,
-  commands, localization parity, reload, lifecycle cleanup, and artifact identity.
+- Cover parser validation, progression, decay, speed restoration, protection events, persistence migration, road
+  geometry/history/commit/undo, commands, localization parity, reload, lifecycle cleanup, and artifact identity.
 
 ## Build
 

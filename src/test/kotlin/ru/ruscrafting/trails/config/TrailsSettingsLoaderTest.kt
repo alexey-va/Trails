@@ -8,23 +8,20 @@ import java.nio.file.Files
 
 class TrailsSettingsLoaderTest :
     FreeSpec({
-        "loads the v2 split configuration without mixing integration settings" {
+        "loads the v3 split configuration with event protection and CoreProtect settings" {
             val folder = Files.createTempDirectory("trails-settings-")
             try {
                 writeValidConfiguration(folder)
                 Files.writeString(
                     folder.resolve("config.yml"),
                     Files.readString(folder.resolve("config.yml"))
-                        .replace("    log-block-changes: true # LogBlock", "    log-block-changes: false # LogBlock")
-                        .replace("    enabled: true # RedProtect", "    enabled: false # RedProtect"),
+                        .replace("    block-place-compatibility: true", "    block-place-compatibility: false"),
                 )
 
                 val settings = load(folder)
 
-                settings.integrations.logBlockChanges shouldBe false
+                settings.integrations.blockPlaceCompatibilityEvent shouldBe false
                 settings.integrations.coreProtectChanges shouldBe true
-                settings.integrations.redProtectEnabled shouldBe false
-                settings.integrations.protectionMode shouldBe ProtectionMode.BUKKIT_EVENT
                 settings.worldMode shouldBe WorldMode.ALLOWLIST
                 settings.worldEnabled("survival") shouldBe true
                 settings.worldEnabled("world") shouldBe false
@@ -119,18 +116,21 @@ class TrailsSettingsLoaderTest :
             }
         }
 
-        "rejects an unknown protection mode" {
+        "rejects a malformed protection compatibility toggle" {
             val folder = Files.createTempDirectory("trails-settings-")
             try {
                 writeValidConfiguration(folder)
                 Files.writeString(
                     folder.resolve("config.yml"),
-                    Files.readString(folder.resolve("config.yml")).replace("    mode: bukkit-event", "    mode: magic"),
+                    Files.readString(folder.resolve("config.yml")).replace(
+                        "    block-place-compatibility: true",
+                        "    block-place-compatibility: maybe",
+                    ),
                 )
 
                 val error = shouldThrow<TrailsSettingsException> { load(folder) }
 
-                error.problems shouldContain "integrations.protection.mode must be one of: plugin-api, bukkit-event, both"
+                error.problems shouldContain "integrations.protection-events.block-place-compatibility must be a boolean"
             } finally {
                 folder.toFile().deleteRecursively()
             }
@@ -151,7 +151,7 @@ class TrailsSettingsLoaderTest :
             Files.writeString(
                 folder.resolve("config.yml"),
                 """
-                config-version: 2
+                config-version: 3
                 locale: ru-RU
                 commands:
                   localized-alias: footpaths
@@ -190,36 +190,10 @@ class TrailsSettingsLoaderTest :
                 storage:
                   player-preferences-save-interval-minutes: 5
                 integrations:
-                  protection:
-                    mode: bukkit-event
-                  towny:
-                    enabled: true
-                    allow-in-wilderness: true
-                    permission-mode: false
-                  lands:
-                    enabled: true
-                    allow-in-wilderness: true
-                    apply-flag-to-subareas: true
-                    flag-icon-material: DIRT_PATH
-                  griefprevention:
-                    enabled: true
-                    allow-in-wilderness: true
-                  worldguard:
-                    enabled: true
-                    allow-bypass: false
-                    register-decay-flag: false
-                  logblock:
-                    log-block-changes: true # LogBlock
+                  protection-events:
+                    block-place-compatibility: true
                   coreprotect:
                     log-block-changes: true
-                  playerplot:
-                    enabled: true
-                  redprotect:
-                    enabled: true # RedProtect
-                  residence:
-                    enabled: true
-                  dynmap:
-                    trigger-render: true
                 """.trimIndent(),
             )
             Files.writeString(

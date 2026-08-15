@@ -5,6 +5,7 @@ import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
 import org.bukkit.entity.Player
 import org.bukkit.event.block.BlockPlaceEvent
+import org.bukkit.event.block.BlockFadeEvent
 import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
@@ -22,10 +23,12 @@ class BukkitEventProtection(
         player: Player,
         block: Block,
         target: Material,
+        blockPlaceCompatibility: Boolean = true,
     ): Boolean {
         val event = EntityChangeBlockEvent(player, block, target.createBlockData())
         pluginManager.callEvent(event)
         if (event.isCancelled) return false
+        if (!blockPlaceCompatibility) return true
 
         val itemMaterial = target.takeIf(Material::isItem) ?: block.type.takeIf(Material::isItem) ?: Material.DIRT
         val placeEvent =
@@ -40,5 +43,16 @@ class BukkitEventProtection(
             )
         pluginManager.callEvent(placeEvent)
         return !placeEvent.isCancelled && placeEvent.canBuild()
+    }
+
+    fun canDecay(
+        block: Block,
+        target: Material,
+    ): Boolean {
+        val state = block.state
+        state.type = target
+        val event = BlockFadeEvent(block, state)
+        pluginManager.callEvent(event)
+        return !event.isCancelled
     }
 }

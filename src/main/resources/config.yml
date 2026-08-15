@@ -1,6 +1,6 @@
-# Trails 2.x configuration.
+# Trails configuration.
 # Every duration and percentage includes its unit in the key.
-config-version: 2
+config-version: 3
 
 locale: en-US
 
@@ -54,44 +54,9 @@ storage:
   player-preferences-save-interval-minutes: 5
 
 integrations:
-  protection:
-    # plugin-api: explicit hooks below; bukkit-event: universal cancellable change/place events; both: require both.
-    mode: bukkit-event
-
-  towny:
-    enabled: true
-    allow-in-wilderness: true
-    permission-mode: false
-
-  lands:
-    enabled: true
-    allow-in-wilderness: true
-    apply-flag-to-subareas: true
-    flag-icon-material: DIRT_PATH
-
-  griefprevention:
-    enabled: true
-    allow-in-wilderness: true
-
-  worldguard:
-    enabled: true
-    allow-bypass: false
-    register-decay-flag: false
-
-  logblock:
-    log-block-changes: true
+  protection-events:
+    # Also probe BlockPlaceEvent for claim plugins that do not inspect EntityChangeBlockEvent.
+    block-place-compatibility: true
 
   coreprotect:
     log-block-changes: true
-
-  playerplot:
-    enabled: true
-
-  redprotect:
-    enabled: true
-
-  residence:
-    enabled: true
-
-  dynmap:
-    trigger-render: true

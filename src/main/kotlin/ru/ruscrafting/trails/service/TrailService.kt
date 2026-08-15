@@ -3,6 +3,7 @@ package ru.ruscrafting.trails.service
 import org.bukkit.Material
 import org.bukkit.Chunk
 import org.bukkit.block.Block
+import org.bukkit.block.data.BlockData
 import org.bukkit.entity.Player
 import ru.ruscrafting.trails.domain.DecayDecision
 import ru.ruscrafting.trails.domain.ProgressDecision
@@ -54,7 +55,11 @@ class TrailService(
         }
     }
 
-    fun decay(block: Block, fraction: Double): Boolean {
+    fun decay(
+        block: Block,
+        fraction: Double,
+        canChange: (Material) -> Boolean = { true },
+    ): Boolean {
         val stored = store.read(block) ?: return false
         val stage = catalog.resolve(block.type.name, stored.identity) ?: return false
         return when (val decision = progress.decay(stage, stored.walks, fraction)) {
@@ -68,7 +73,9 @@ class TrailService(
                 true
             }
             is DecayDecision.Regressed -> {
-                changeMaterial("NaturalTrailDecay", block, Material.valueOf(decision.to.material))
+                val material = Material.valueOf(decision.to.material)
+                if (!canChange(material)) return false
+                changeMaterial("NaturalTrailDecay", block, material)
                 store.write(
                     block,
                     TrailBlockState(
@@ -98,9 +105,40 @@ class TrailService(
 
     fun clear(block: Block) = store.clear(block)
 
+    fun placeRoad(
+        actor: String,
+        block: Block,
+        afterData: BlockData,
+    ): TrailBlockState? {
+        val previous = store.read(block)
+        changeBlockData(actor, block, afterData)
+        val identity = checkNotNull(catalog.resolve(block.type.name, null)?.identity) {
+            "Road material ${block.type.name} is not present in trails.yml"
+        }
+        store.write(block, TrailBlockState(identity, 0))
+        return previous
+    }
+
+    fun restoreRoad(
+        actor: String,
+        block: Block,
+        beforeData: BlockData,
+        previous: TrailBlockState?,
+    ) {
+        changeBlockData(actor, block, beforeData)
+        if (previous == null) store.clear(block) else store.write(block, previous)
+    }
+
     private fun changeMaterial(actor: String, block: Block, material: Material) {
         val before = block.state
         block.setType(material, false)
+        val after = block.state
+        observer.changed(actor, before, after)
+    }
+
+    private fun changeBlockData(actor: String, block: Block, blockData: BlockData) {
+        val before = block.state
+        block.setBlockData(blockData, false)
         val after = block.state
         observer.changed(actor, before, after)
     }

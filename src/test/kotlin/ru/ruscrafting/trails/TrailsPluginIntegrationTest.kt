@@ -3,12 +3,14 @@ package ru.ruscrafting.trails
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Material
+import org.bukkit.Location
 import org.bukkit.block.BlockFace
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
+import org.bukkit.event.block.BlockFadeEvent
 import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.inventory.EquipmentSlot
@@ -234,7 +236,29 @@ class TrailsPluginIntegrationTest :
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
 
             server.pluginManager.callEvent(BlockBreakEvent(block, player))
+            server.scheduler.performTicks(1)
             plugin.inspectTrail(block) shouldBe null
+        }
+
+        "natural material decay fires BlockFadeEvent and respects cancellation" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("DecayGuard")
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            plugin.forceTrail(player, block)
+            block.type shouldBe Material.DIRT
+            val listener = object : Listener {}
+            server.pluginManager.registerEvent(
+                BlockFadeEvent::class.java,
+                listener,
+                EventPriority.NORMAL,
+                { _, raw -> (raw as BlockFadeEvent).isCancelled = true },
+                plugin,
+            )
+
+            plugin.decayBlock(block) shouldBe false
+
+            block.type shouldBe Material.DIRT
+            plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
         }
 
         "only tagged command-issued tools trigger trail actions" {
@@ -283,11 +307,90 @@ class TrailsPluginIntegrationTest :
             target.inventory.contents.filterNotNull().single().let(plugin::toolKind) shouldBe TrailToolKind.INSPECT
         }
 
-        "status and validate commands expose the active v2 configuration" {
+        "status and validate commands expose the active v3 configuration" {
             val admin = server.addPlayer("StatusAdmin")
             admin.isOp = true
 
             server.dispatchCommand(admin, "trails status") shouldBe true
             server.dispatchCommand(admin, "trails validate") shouldBe true
+        }
+
+        "roads preview is client-only until commit and undo restores exact blocks" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("RoadBuilder")
+            admin.isOp = true
+            for (x in -2..3) {
+                for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.GRASS_BLOCK
+            }
+            world.loadChunk(0, 0)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            server.dispatchCommand(admin, "trails road start rustic") shouldBe true
+            plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5)) shouldBe true
+            world.getBlockAt(1, 64, 0).type shouldBe Material.GRASS_BLOCK
+
+            server.dispatchCommand(admin, "trails road commit") shouldBe true
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT_PATH
+            plugin.inspectTrail(world.getBlockAt(1, 64, 0))?.walks shouldBe 0
+
+            server.dispatchCommand(admin, "trails road undo") shouldBe true
+            world.getBlockAt(1, 64, 0).type shouldBe Material.GRASS_BLOCK
+            plugin.inspectTrail(world.getBlockAt(1, 64, 0)) shouldBe null
+
+            server.dispatchCommand(admin, "trails road start rustic") shouldBe true
+            plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5)) shouldBe true
+            server.dispatchCommand(admin, "trails road commit") shouldBe true
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+
+            server.dispatchCommand(admin, "trails road undo") shouldBe true
+
+            world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
+            world.getBlockAt(1, 64, 1).type shouldBe Material.COARSE_DIRT
+        }
+
+        "roads commit is all-or-nothing when a protection event vetoes one block" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("ProtectedRoadBuilder")
+            admin.isOp = true
+            for (x in -2..3) {
+                for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.GRASS_BLOCK
+            }
+            world.loadChunk(0, 0)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+            val listener = object : Listener {}
+            server.pluginManager.registerEvent(
+                BlockPlaceEvent::class.java,
+                listener,
+                EventPriority.NORMAL,
+                { _, raw ->
+                    val event = raw as BlockPlaceEvent
+                    if (event.block.x == 1 && event.block.z == 0) event.isCancelled = true
+                },
+                plugin,
+            )
+
+            server.dispatchCommand(admin, "trails road start rustic") shouldBe true
+            plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5)) shouldBe true
+            server.dispatchCommand(admin, "trails road commit") shouldBe true
+
+            for (x in 0..1) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type shouldBe Material.GRASS_BLOCK
+            }
         }
     })

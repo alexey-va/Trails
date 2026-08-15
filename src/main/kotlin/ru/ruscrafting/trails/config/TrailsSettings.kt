@@ -13,15 +13,6 @@ enum class WorldMode {
     BLOCKLIST,
 }
 
-enum class ProtectionMode(
-    val usesPluginApi: Boolean,
-    val usesBukkitEvent: Boolean,
-) {
-    PLUGIN_API(usesPluginApi = true, usesBukkitEvent = false),
-    BUKKIT_EVENT(usesPluginApi = false, usesBukkitEvent = true),
-    BOTH(usesPluginApi = true, usesBukkitEvent = true),
-}
-
 data class TrailsSettings(
     val configVersion: Int,
     val trailsConfigVersion: Int,
@@ -75,25 +66,8 @@ data class TrailsSettings(
 }
 
 data class IntegrationSettings(
-    val protectionMode: ProtectionMode,
-    val townyEnabled: Boolean,
-    val townyPathsInWilderness: Boolean,
-    val townyPermissionMode: Boolean,
-    val landsEnabled: Boolean,
-    val landsPathsInWilderness: Boolean,
-    val landsApplyInSubAreas: Boolean,
-    val landsFlagIconMaterial: String,
-    val griefPreventionEnabled: Boolean,
-    val griefPreventionPathsInWilderness: Boolean,
-    val worldGuardEnabled: Boolean,
-    val worldGuardCheckBypass: Boolean,
-    val worldGuardDecayFlag: Boolean,
-    val logBlockChanges: Boolean,
+    val blockPlaceCompatibilityEvent: Boolean,
     val coreProtectChanges: Boolean,
-    val playerPlotEnabled: Boolean,
-    val redProtectEnabled: Boolean,
-    val residenceEnabled: Boolean,
-    val dynmapRender: Boolean,
 )
 
 class TrailsSettingsException(
@@ -101,7 +75,7 @@ class TrailsSettingsException(
 ) : IllegalArgumentException(problems.joinToString(separator = "\n"))
 
 object TrailsSettingsLoader {
-    const val CONFIG_VERSION = 2
+    const val CONFIG_VERSION = 3
     const val TRAILS_CONFIG_VERSION = 1
     private val COMMAND_ALIAS = Regex("[a-z0-9_-]+")
 
@@ -144,18 +118,6 @@ object TrailsSettingsLoader {
         val particle = enumValue("trail-creation.visualization-particle", config, "NAUTILUS", particleExists, problems, "particle")
         val trailTool = itemMaterial("tools.advance", config, "IRON_SHOVEL", materialExists, problems)
         val infoTool = itemMaterial("tools.inspect", config, "STICK", materialExists, problems)
-        val landsFlagIcon = enumValue("integrations.lands.flag-icon-material", config, "DIRT_PATH", materialExists, problems, "material")
-        val protectionMode =
-            when (config.string("integrations.protection.mode", "plugin-api").trim().lowercase()) {
-                "plugin-api" -> ProtectionMode.PLUGIN_API
-                "bukkit-event" -> ProtectionMode.BUKKIT_EVENT
-                "both" -> ProtectionMode.BOTH
-                else -> {
-                    problems += "integrations.protection.mode must be one of: plugin-api, bukkit-event, both"
-                    ProtectionMode.PLUGIN_API
-                }
-            }
-
         val definitions =
             try {
                 StructuredTrailDefinitionParser(materialExists).parse(trails.value("trails"))
@@ -197,25 +159,9 @@ object TrailsSettingsLoader {
                 saveIntervalMinutes = positiveLong(config, "storage.player-preferences-save-interval-minutes", 5L, problems),
                 integrations =
                     IntegrationSettings(
-                        protectionMode = protectionMode,
-                        townyEnabled = boolean(config, "integrations.towny.enabled", true, problems),
-                        townyPathsInWilderness = boolean(config, "integrations.towny.allow-in-wilderness", true, problems),
-                        townyPermissionMode = boolean(config, "integrations.towny.permission-mode", false, problems),
-                        landsEnabled = boolean(config, "integrations.lands.enabled", true, problems),
-                        landsPathsInWilderness = boolean(config, "integrations.lands.allow-in-wilderness", true, problems),
-                        landsApplyInSubAreas = boolean(config, "integrations.lands.apply-flag-to-subareas", true, problems),
-                        landsFlagIconMaterial = landsFlagIcon,
-                        griefPreventionEnabled = boolean(config, "integrations.griefprevention.enabled", true, problems),
-                        griefPreventionPathsInWilderness = boolean(config, "integrations.griefprevention.allow-in-wilderness", true, problems),
-                        worldGuardEnabled = boolean(config, "integrations.worldguard.enabled", true, problems),
-                        worldGuardCheckBypass = boolean(config, "integrations.worldguard.allow-bypass", false, problems),
-                        worldGuardDecayFlag = boolean(config, "integrations.worldguard.register-decay-flag", false, problems),
-                        logBlockChanges = boolean(config, "integrations.logblock.log-block-changes", true, problems),
+                        blockPlaceCompatibilityEvent =
+                            boolean(config, "integrations.protection-events.block-place-compatibility", true, problems),
                         coreProtectChanges = boolean(config, "integrations.coreprotect.log-block-changes", true, problems),
-                        playerPlotEnabled = boolean(config, "integrations.playerplot.enabled", true, problems),
-                        redProtectEnabled = boolean(config, "integrations.redprotect.enabled", true, problems),
-                        residenceEnabled = boolean(config, "integrations.residence.enabled", true, problems),
-                        dynmapRender = boolean(config, "integrations.dynmap.trigger-render", true, problems),
                     ),
                 definitions = definitions,
             )
@@ -429,25 +375,8 @@ object LegacyTrailsSettingsLoader {
                 saveIntervalMinutes = positiveLong("Data-Saving.Interval", 5L),
                 integrations =
                     IntegrationSettings(
-                        protectionMode = ProtectionMode.PLUGIN_API,
-                        townyEnabled = true,
-                        townyPathsInWilderness = config.boolean("Plugin-Integration.Towny.PathsInWilderness", true),
-                        townyPermissionMode = config.boolean("Plugin-Integration.Towny.TownyPathsPerm", false),
-                        landsEnabled = true,
-                        landsPathsInWilderness = config.boolean("Plugin-Integration.Lands.PathsInWilderness", true),
-                        landsApplyInSubAreas = config.boolean("Plugin-Integration.Lands.ApplyInSubAreas", true),
-                        landsFlagIconMaterial = "DIRT_PATH",
-                        griefPreventionEnabled = true,
-                        griefPreventionPathsInWilderness = config.boolean("Plugin-Integration.GriefPrevention.PathsInWilderness", true),
-                        worldGuardEnabled = config.boolean("Plugin-Integration.WorldGuard.IntegrationEnabled", true),
-                        worldGuardCheckBypass = config.boolean("Plugin-Integration.WorldGuard.CheckBypass", false),
-                        worldGuardDecayFlag = config.boolean("Plugin-Integration.WorldGuard.decay-flag", false),
-                        logBlockChanges = config.boolean("Plugin-Integration.LogBlock.LogPathBlocks", true),
+                        blockPlaceCompatibilityEvent = true,
                         coreProtectChanges = config.boolean("Plugin-Integration.CoreProtect.LogPathBlocks", true),
-                        playerPlotEnabled = config.boolean("Plugin-Integration.PlayerPlot.integration-enabled", true),
-                        redProtectEnabled = config.boolean("Plugin-Integration.RedProtect.integration-enabled", true),
-                        residenceEnabled = config.boolean("Plugin-Integration.Residence.integration-enabled", true),
-                        dynmapRender = config.boolean("Plugin-Integration.Dynmap.trails-trigger-render", true),
                     ),
                 definitions = definitions,
             )

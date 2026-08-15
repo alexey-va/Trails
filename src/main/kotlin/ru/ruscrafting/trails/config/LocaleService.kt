@@ -20,8 +20,6 @@ class LocaleService private constructor(
     private val prefixRaw: String,
 ) {
     val formatName: String = configuredFormat.name.lowercase()
-    val landsDisplayName: String = SECTION.serialize(renderValue("lands.flag.display-name"))
-    val landsDescription: List<String> = renderValueList("lands.flag.description").map(SECTION::serialize)
 
     fun render(
         path: String,
@@ -70,14 +68,6 @@ class LocaleService private constructor(
     ): List<String> = renderValueList(path, replacements).map(SECTION::serialize)
 
     fun plain(path: String): String = config.stringOrNull(path) ?: path
-
-    private fun renderValue(
-        path: String,
-        replacements: Map<String, String> = emptyMap(),
-    ): Component {
-        val raw = config.stringOrNull(path) ?: path
-        return renderRaw(raw, formatFor(path), replacements)
-    }
 
     private fun renderValueList(
         path: String,

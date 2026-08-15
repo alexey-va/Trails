@@ -9,25 +9,26 @@ the existing Trails Spigot resource.
 - Paper/Purpur 1.21.11
 - Java 21 or newer
 - Existing Trails 1.9 `config.yml`, `players.yml`, locale files, and block metadata
-- Optional Lands, WorldGuard, CoreProtect, PlaceholderAPI, Towny, GriefPrevention, PlayerPlot, RedProtect,
-  Residence, LogBlock, and Dynmap integrations
+- Optional CoreProtect and PlaceholderAPI integrations
 
-The unfinished legacy road-template editor is intentionally excluded from 2.0.
+Claim plugins are supported through cancellable Bukkit events instead of private or reflection-based APIs.
 
 ## Configuration
 
-Trails 2.x uses two versioned operator files:
+Trails 2.1 uses three versioned operator files:
 
 - `config.yml` contains gameplay, world, storage, command, and integration settings.
 - `trails.yml` contains structured, weighted trail definitions and their stages.
+- `roads.yml` contains the opt-in Roads safety limits, world allowlist, replaceable surfaces, and profiles.
 
 Every duration and percentage states its unit in the key. Trail IDs such as `DirtPath` are persisted in block
 metadata and should not be renamed casually.
 
-When a 1.9 `config.yml` is detected, Trails validates it completely, writes `config.v1.backup.yml`, generates both
-v2 files through temporary files, validates the generated result, and replaces `config.yml` last. A failed
-migration leaves the legacy file untouched. `players.yml` and the `trails:w` / `trails:n` block keys are never
-rewritten by the config migrator.
+When a 1.9 `config.yml` is detected, Trails validates it completely, writes `config.v1.backup.yml`, generates the
+current files through temporary files, validates the generated result, and replaces `config.yml` last. Schema v2 is
+likewise migrated to v3 with `config.v2.backup.yml`; obsolete plugin-specific adapter settings are intentionally
+dropped. A failed migration leaves the old file untouched. `players.yml` and the `trails:w` / `trails:n` block keys
+are never rewritten by the config migrator.
 
 Bundled locales use MiniMessage. Existing locale files without a `format` key continue to use legacy ampersand
 colors and inherit missing bundled messages without being overwritten. Dynamic values such as player names are
@@ -40,24 +41,25 @@ Useful operator commands:
 - `/trails status` shows schema versions, world scope, loaded definitions, and integration state.
 - `/trails give inspect [player]` gives the tagged inspection stick.
 - `/trails give advance [player]` gives the tagged trail-advance shovel.
+- `/trails road start <profile> [player]` starts a client-only road preview while the player walks.
+- `/trails road commit [player]`, `cancel`, `status`, and `undo` manage the bounded road plan.
 
 Giving tools requires `trails.tools.give` (operator by default). Only items issued by Trails carry the required
 persistent tag and activate the listeners, so ordinary sticks and shovels are ignored. Tagged tools can be used by
 players with `trails.info-tool` or `trails.trail-tool`; both are granted by default, while protection checks remain
 active for the advance tool.
 
-Protection has three modes under `integrations.protection.mode`:
+Before a player-caused material transition, Trails fires a cancellable `EntityChangeBlockEvent` with the exact target
+material. By default it follows with a compatibility `BlockPlaceEvent` for claim plugins that only guard conventional
+building; this probe can be disabled under `integrations.protection-events` if a server has an incompatible observer.
+Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition without a hard dependency. Natural
+decay uses `BlockFadeEvent`. Ordinary step-counter increments do not emit world-change events.
 
-- `bukkit-event` fires a cancellable `EntityChangeBlockEvent` with the exact target material, followed by a
-  compatibility `BlockPlaceEvent` for classic claim plugins, immediately before an actual trail material change.
-  Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition without a hard dependency.
-- `plugin-api` preserves the explicit Towny, Lands, GriefPrevention, WorldGuard, PlayerPlot, RedProtect, and Residence
-  adapters and their Trails-specific options.
-- `both` requires both checks to allow the change.
-
-Fresh configurations use `bukkit-event`; migrated 1.x configurations retain `plugin-api` behavior. The generic event
-is not fired for ordinary step-counter increments, only for a material transition, and a cancellation leaves both the
-block and its stored trail stage unchanged.
+Roads are disabled by default and require `trails.roads.manage` (operator by default). Preview blocks are sent only
+to the builder and never touch the world. Commit rechecks loaded chunks, exact block snapshots, the replaceable
+surface allowlist, headroom, and protection events before applying the whole plan on the server thread. A failed
+apply is rolled back; the last commit for up to 10 builders is stored atomically in `road-history.yml`. Undo succeeds
+only while every road block still exactly matches the committed snapshot, so it cannot overwrite later edits.
 
 ## Build
 
@@ -65,11 +67,12 @@ block and its stored trail stage unchanged.
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.0.2.jar`.
+The deployable JAR is written to `build/libs/Trails-2.1.0.jar`.
 
-The Gradle wrapper is pinned to 9.5.0 with its official distribution checksum. Dependency and plugin versions are
-centralized in `gradle/libs.versions.toml`; Maven repositories are restricted to the groups they are expected to
-serve. CI runs the complete build on Java 21 and Java 25, while the published classes target Java 21 bytecode.
+The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
+are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven
+repositories are restricted to the groups they are expected to serve. CI runs the complete build on Java 21 and Java
+25, while the published classes target Java 21 bytecode.
 
 `arc-core` was evaluated for configuration support and is small enough at runtime, but it is intentionally not a
 build dependency: Trails is public while `arc-core` is private, so depending on it would make public CI and external
@@ -77,11 +80,11 @@ builds non-reproducible. Trails keeps the required atomic YAML behavior in its o
 
 ## Architecture
 
-- `domain` — trail parsing, selection, progression, decay, and speed decisions without Bukkit.
+- `domain` — trail parsing, selection, progression, decay, speed decisions, and road geometry without Bukkit.
 - `config` — versioned split configuration, transactional legacy migration, and MiniMessage/legacy localization.
-- `storage` — player preferences and block metadata compatibility.
-- `bukkit` — listeners, commands, schedulers, and particles.
-- `integration` — protection, logging, map, and PlaceholderAPI adapters.
+- `storage` — player preferences, block metadata compatibility, and restart-safe road undo history.
+- `bukkit` — listeners, commands, schedulers, particles, and safe road preview/commit orchestration.
+- `integration` — generic Bukkit protection events, CoreProtect logging, and PlaceholderAPI.
 
 ## License
 

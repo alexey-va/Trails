@@ -26,14 +26,14 @@ class LegacyConfigMigratorTest :
                 Files.readString(folder.resolve("config.v1.backup.yml")) shouldBe legacy
                 Files.readString(folder.resolve("players.yml")) shouldBe playerDataBefore
                 val migrated = loadV2(folder)
-                migrated.configVersion shouldBe 2
+                migrated.configVersion shouldBe 3
                 migrated.trailsConfigVersion shouldBe 1
                 migrated.commandAlias shouldBe "footpaths"
                 migrated.worldMode shouldBe WorldMode.ALLOWLIST
                 migrated.enabledWorlds shouldBe setOf("survival")
                 migrated.decayFraction shouldBe 0.03
                 migrated.chunkChance shouldBe 0.2
-                migrated.integrations.protectionMode shouldBe ProtectionMode.PLUGIN_API
+                migrated.integrations.blockPlaceCompatibilityEvent shouldBe true
                 migrated.definitions.single().name shouldBe "DirtPath"
                 migrated.definitions.single().stages.last().speedMultiplier shouldBe 1.1
 
@@ -44,7 +44,7 @@ class LegacyConfigMigratorTest :
             }
         }
 
-        "invalid legacy input is rejected before backups or v2 files are written" {
+        "invalid legacy input is rejected before backups or current files are written" {
             val folder = Files.createTempDirectory("trails-migration-invalid-")
             try {
                 val invalid = legacyConfig().replace("speed-boost-interval: 1", "speed-boost-interval: 0")
@@ -91,9 +91,45 @@ class LegacyConfigMigratorTest :
                 folder.toFile().deleteRecursively()
             }
         }
+
+        "migrates v2 to v3 while preserving active behavior and dropping adapter configuration" {
+            val folder = Files.createTempDirectory("trails-migration-v2-")
+            try {
+                val bundledConfig =
+                    checkNotNull(LegacyConfigMigratorTest::class.java.classLoader.getResourceAsStream("config.yml"))
+                        .bufferedReader().use { it.readText() }
+                val v2 =
+                    bundledConfig
+                        .replace("config-version: 3", "config-version: 2")
+                        .replace("locale: en-US", "locale: ru-RU")
+                        .replace("    log-block-changes: true", "    log-block-changes: false")
+                        .replace(
+                            "  coreprotect:\n    log-block-changes: false",
+                            "  coreprotect:\n    log-block-changes: false\n  towny:\n    enabled: true",
+                        )
+                Files.writeString(folder.resolve("config.yml"), v2)
+                checkNotNull(LegacyConfigMigratorTest::class.java.classLoader.getResourceAsStream("trails.yml")).use {
+                    Files.copy(it, folder.resolve("trails.yml"))
+                }
+
+                val result = migrator(folder).migrateIfNeeded(YamlConfig(folder, "config.yml"))
+
+                result.migrated shouldBe true
+                result.backup?.fileName.toString() shouldBe "config.v2.backup.yml"
+                Files.readString(folder.resolve("config.v2.backup.yml")) shouldBe v2
+                val migrated = loadV2(folder)
+                migrated.configVersion shouldBe 3
+                migrated.language shouldBe "ru-RU"
+                migrated.integrations.coreProtectChanges shouldBe false
+                YamlConfig(folder, "config.yml").existsExplicitly("integrations.towny") shouldBe false
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
     }) {
     companion object {
-        private val materials = setOf("GRASS_BLOCK", "DIRT", "DIRT_PATH", "IRON_SHOVEL", "STICK")
+        private val materials =
+            setOf("GRASS_BLOCK", "DIRT", "COARSE_DIRT", "DIRT_PATH", "SAND", "SANDSTONE", "IRON_SHOVEL", "STICK")
 
         private fun migrator(folder: java.nio.file.Path) =
             LegacyConfigMigrator(

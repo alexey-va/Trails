@@ -4,8 +4,6 @@ shadow = "9.6.1"
 paper = "1.21.11-R0.1-SNAPSHOT"
 custom-block-data = "2.2.5"
 bstats = "3.2.1"
-lands-api = "7.25.4"
-worldguard = "7.0.17"
 coreprotect = "23.2"
 placeholder-api = "2.12.3"
 kotest = "6.2.4"
@@ -16,8 +14,6 @@ mockbukkit = "4.110.0"
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
 custom-block-data = { module = "com.jeff-media:custom-block-data", version.ref = "custom-block-data" }
 bstats-bukkit = { module = "org.bstats:bstats-bukkit", version.ref = "bstats" }
-lands-api = { module = "com.github.angeschossen:LandsAPI", version.ref = "lands-api" }
-worldguard-bukkit = { module = "com.sk89q.worldguard:worldguard-bukkit", version.ref = "worldguard" }
 coreprotect = { module = "net.coreprotect:coreprotect", version.ref = "coreprotect" }
 placeholder-api = { module = "me.clip:placeholderapi", version.ref = "placeholder-api" }
 kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
