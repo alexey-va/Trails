@@ -1,45 +1,49 @@
-command-name: "trails"
-plugin-prefix: "&eТропы &7»"
+format: minimessage
+plugin-prefix: '<yellow>Тропы <gray>»'
 messages:
-  ## These are messages sent in game when commands are used. There are some placeholders
-  ## You have to use.
-  ## %plugin_prefix% = plugin prefix you set above         %command% = Name of the command you set above
-  ## %name% = name of person referred to
-  alreadyMaxLevel: "%plugin_prefix% &6Ваша тропа уже имеет максимальный уровень!"
-  noPerm: "%plugin_prefix% &cУ вас нет разрешения на это!"
-  noPermBoost: "%plugin_prefix% &cУ вас нет разрешения на это!"
-  noPermOthers: "%plugin_prefix% &cУ вас нет разрешения на переключения настроек других игроков."
-  consoleSpecify: "%plugin_prefix% &cВы должны указать имя игрока."
-  toggledOn: "%plugin_prefix% &6Ваши тропы были &aвключены!"
-  toggledOff: "%plugin_prefix% &6Ваши тропы были &cотключены!"
-  boostOn: "%plugin_prefix% &6Ваше ускорение было &aвключено!"
-  boostOff: "%plugin_prefix% &6Ваше ускорение было &cвыключено!"
-  toggledOnOther: "%plugin_prefix% &6Тропы &e%name% &6были &aвключены!"
-  toggledOffOther: "%plugin_prefix% &6Тропы &e%name% &6были &aвыключены!"
-  notPlayedBefore: "%plugin_prefix% &cИгрок &e%name% &cне был найден."
-  cantCreateTrails: "%plugin_prefix% &cВы не можете создавать тропы здесь."
-  saveMessage: "%plugin_prefix% данные успешно сохранены!"
-  alreadyOff: "%plugin_prefix% &6Ваши тропы &cуже отключены!"
-  alreadyOn: "%plugin_prefix% &6Ваши тропы &aуже включены!"
-  alreadyOffBoost: "%plugin_prefix% &6Ваше ускорение &cуже отключено!"
-  alreadyOnBoost: "%plugin_prefix% &6Ваше ускорение &cуже включено!"
-  reload: "%plugin_prefix% &6Плагин успешно перезагружен!"
-  reloadNoPerm: "%plugin_prefix% &cУ вас нет на это разрешения!"
-  tooManyArgs: "%plugin_prefix% &cСлишком много аргументов!"
-  wrongArgs: "%plugin_prefix% &cНеверная команда!"
-  alreadyOnBoostOther: "%plugin_prefix% &6Ускорение &e%name% &aуже включено!"
-  alreadyOffBoostOther: "%plugin_prefix% &6Ускорение &e%name% &cуже выключено!"
-  toggledOnBoostOther: "%plugin_prefix% &6Ускорение &e%name% &aвключено!"
-  toggledOffBoostOther: "%plugin_prefix% &6Ускорение &e%name% &cвыключено!"
-  showing-trails: '%plugin_prefix% &eОтображаем тропы.'
-  showing-trails-radius: '%plugin_prefix% &eОтображаем тропы в радиусе &6%radius% блоков.'
-  second-argument-not-double: '%plugin_prefix% &cВторой аргумент неверный. &7Укажите радиус отображения блоков.'
+  alreadyMaxLevel: '<prefix> <gold>Эта тропа уже достигла последней стадии.'
+  noPerm: '<prefix> <red>У вас нет разрешения на это.'
+  noPermBoost: '<prefix> <red>У вас нет разрешения переключать ускорение.'
+  noPermOthers: '<prefix> <red>У вас нет разрешения менять настройки других игроков.'
+  consoleSpecify: '<prefix> <red>При запуске из консоли укажите игрока.'
+  toggledOn: '<prefix> <gold>Создание троп <green>включено<gold>.'
+  toggledOff: '<prefix> <gold>Создание троп <red>выключено<gold>.'
+  boostOn: '<prefix> <gold>Ускорение на тропах <green>включено<gold>.'
+  boostOff: '<prefix> <gold>Ускорение на тропах <red>выключено<gold>.'
+  toggledOnOther: '<prefix> <gold>Тропы игрока <yellow><name> <green>включены<gold>.'
+  toggledOffOther: '<prefix> <gold>Тропы игрока <yellow><name> <red>выключены<gold>.'
+  notPlayedBefore: '<prefix> <red>Игрок <yellow><name> <red>не найден.'
+  cantCreateTrails: '<prefix> <red>Здесь нельзя создавать тропы.'
+  saveMessage: '<prefix> <green>Настройки игроков сохранены.'
+  alreadyOff: '<prefix> <gold>Создание троп уже <red>выключено<gold>.'
+  alreadyOn: '<prefix> <gold>Создание троп уже <green>включено<gold>.'
+  alreadyOffBoost: '<prefix> <gold>Ускорение уже <red>выключено<gold>.'
+  alreadyOnBoost: '<prefix> <gold>Ускорение уже <green>включено<gold>.'
+  reload: '<prefix> <green>Конфигурация перезагружена.'
+  reloadNoPerm: '<prefix> <red>У вас нет разрешения перезагружать Trails.'
+  tooManyArgs: '<prefix> <red>Слишком много аргументов.'
+  wrongArgs: '<prefix> <red>Неверные аргументы команды.'
+  alreadyOnBoostOther: '<prefix> <gold>Ускорение игрока <yellow><name> <green>уже включено<gold>.'
+  alreadyOffBoostOther: '<prefix> <gold>Ускорение игрока <yellow><name> <red>уже выключено<gold>.'
+  toggledOnBoostOther: '<prefix> <gold>Ускорение игрока <yellow><name> <green>включено<gold>.'
+  toggledOffBoostOther: '<prefix> <gold>Ускорение игрока <yellow><name> <red>выключено<gold>.'
+  showing-trails: '<prefix> <yellow>Показываем ближайшие тропы.'
+  showing-trails-radius: '<prefix> <yellow>Показываем тропы в радиусе <gold><radius> <yellow>блоков.'
+  second-argument-not-double: '<prefix> <red>Радиус должен быть числом.'
+  only-players: '<prefix> <red>Эту команду может использовать только игрок.'
+  radius-out-of-range: '<prefix> <red>Радиус должен быть от 1 до 128 блоков.'
+  reloadFailed: '<prefix> <red>Перезагрузка отклонена: <error>'
+  trail-info: '<prefix> <yellow>Шагов: <white><walks><gray>, <yellow>тропа: <white><trail>'
+  statusHeader: '<prefix> <gold>Состояние Trails <version>'
+  statusConfig: '<gray>Конфиги: <white>config v<config-version><gray>, trails v<trails-version>, локаль <locale-format>'
+  statusWorlds: '<gray>Миры: <white><worlds>'
+  statusTrails: '<gray>Троп: <white><trail-count><gray>; стадий: <white><stage-count>'
+  statusIntegrations: '<gray>Интеграции: <white><integrations>'
+  validateOk: '<prefix> <green>Конфигурация корректна: <trail-count> определений троп.'
+  validateFailed: '<prefix> <red>Ошибка конфигурации: <error>'
 lands:
   flag:
-    icon-material: DIRT_PATH
-    display-name: "&6Создание Троп"
+    display-name: '<gold>Создание троп'
     description:
-      - "&7Когда включен, этот флаг"
-      - "&7позволит игрокам отсавлять"
-      - "&7тропинки на этой земле."
-  
+      - '<gray>Разрешает игрокам оставлять'
+      - '<gray>тропинки на этой территории.'

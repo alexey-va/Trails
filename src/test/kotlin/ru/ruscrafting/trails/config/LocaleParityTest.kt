@@ -1,0 +1,58 @@
+package ru.ruscrafting.trails.config
+
+import io.kotest.core.spec.style.FreeSpec
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.shouldBe
+import java.nio.file.Files
+
+class LocaleParityTest :
+    FreeSpec({
+        "Russian and English player messages have identical keys" {
+            val folder = Files.createTempDirectory("trails-locales-")
+            try {
+                val english = YamlConfig(folder, "lang/en-US.yml")
+                val russian = YamlConfig(folder, "lang/ru-RU.yml")
+                val chinese = YamlConfig(folder, "lang/zh-CN.yml")
+
+                russian.keys("messages") shouldContainExactlyInAnyOrder english.keys("messages")
+                russian.keys("lands.flag") shouldContainExactlyInAnyOrder english.keys("lands.flag")
+                chinese.keys("messages") shouldContainExactlyInAnyOrder english.keys("messages")
+                chinese.keys("lands.flag") shouldContainExactlyInAnyOrder english.keys("lands.flag")
+
+                val locale = LocaleService.load(folder, "ru-RU", "trails")
+                locale.formatName shouldBe "minimessage"
+                locale.landsDisplayName shouldBe "§6Создание троп"
+                locale.landsDescription.all { '&' !in it } shouldBe true
+                locale.renderLegacy("messages.toggledOnOther", mapOf("%name%" to "<red>Игрок")) shouldContain "<red>Игрок"
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
+
+        "an existing legacy locale inherits new bundled messages without being overwritten" {
+            val folder = Files.createTempDirectory("trails-legacy-locale-")
+            try {
+                val localeFolder = Files.createDirectories(folder.resolve("lang"))
+                val legacyFile = localeFolder.resolve("ru-RU.yml")
+                val original =
+                    """
+                    command-name: trails
+                    messages:
+                      toggledOn: '%plugin_prefix% &aСвоё сообщение.'
+                    """.trimIndent() + "\n"
+                Files.writeString(legacyFile, original)
+
+                val locale = LocaleService.load(folder, "ru-RU", "trails")
+
+                val rendered = locale.renderLegacy("messages.toggledOn")
+                rendered shouldContain "Своё сообщение"
+                rendered.contains("<gray>") shouldBe false
+                locale.renderLegacy("messages.reloadFailed", mapOf("%error%" to "ошибка")) shouldContain "ошибка"
+                locale.renderLegacy("messages.trail-info", mapOf("%walks%" to "3", "%trail%" to "DirtPath:1")) shouldContain "DirtPath:1"
+                Files.readString(legacyFile) shouldBe original
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
+    })

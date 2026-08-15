@@ -1,0 +1,10 @@
+Trails includes the following relocated runtime libraries:
+
+- Kotlin standard library 2.4.10 — Apache License 2.0
+  https://github.com/JetBrains/kotlin
+- CustomBlockData 2.2.5 — GPL-3.0-or-later
+  https://github.com/JEFF-Media-GbR/CustomBlockData
+- bStats 3.2.1 — MIT License
+  https://github.com/Bastian/bStats
+
+The corresponding source and license texts are available from the linked upstream projects.

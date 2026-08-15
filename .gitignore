@@ -13,5 +13,7 @@ buildNumber.properties
 
 *.iml
 
-.idea
 .idea/
+.gradle/
+build/
+out/

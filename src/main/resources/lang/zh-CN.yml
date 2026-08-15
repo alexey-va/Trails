@@ -1,44 +1,49 @@
-command-name: "trails"
-plugin-prefix: "&7[&e路径&7]&r"
+format: minimessage
+plugin-prefix: '<gray>[<yellow>路径</yellow>]</gray>'
 messages:
-  ## 这些是在游戏中使用命令时发送的消息.
-  ## 有一些占位符是你必须在消息中使用的.
-  ## %plugin_prefix% = 你在上面设置的插件前缀 %command% = 你在上面设置的指令全称
-  ## %name% = 你所指玩家的名称
-  alreadyMaxLevel: "%plugin_prefix% &f你的 &e路径生成 &f已经是最高等级!"
-  noPerm: "%plugin_prefix% &c你没有权限开关路径生成."
-  noPermBoost: "%plugin_prefix% &c你没有权限开关增速."
-  noPermOthers: "%plugin_prefix% &c你没有权限开关其他人的路径生成."
-  consoleSpecify: "%plugin_prefix% &7在控制台&c中使用时必须指定 &f玩家名称."
-  toggledOn: "%plugin_prefix% &f你的 &e路径生成 &f已被切换为&a开启!"
-  toggledOff: "%plugin_prefix% &f你的 &e路径生成 &f已被切换为&c关闭!"
-  boostOn: "%plugin_prefix% &f你的 &e行走增速 &f已 &a开启!"
-  boostOff: "%plugin_prefix% &f你的 &e行走增速 &f已 &c关闭!"
-  toggledOnOther: "%plugin_prefix% %name%&7的 &e路径生成&f 已被切换为 &a开启!"
-  toggledOffOther: "%plugin_prefix% %name%&7的 &e路径生成&f 已被切换为 &c关闭!"
-  notPlayedBefore: "%plugin_prefix% %name%&7此前未在此服务器游玩过."
-  cantCreateTrails: "%plugin_prefix% 你不能在此处创建路径."
-  saveMessage: "%plugin_prefix% 已成功保存了路径数据!"
-  alreadyOff: "%plugin_prefix% &f你的 &e路径生成 &f已经是 &c关闭 &f状态!"
-  alreadyOn: "%plugin_prefix% &f你的 &e路径生成 &f已经是 &a开启 &f状态!"
-  alreadyOffBoost: "%plugin_prefix% &f你的 &e行走增速 &f已经是 &c关闭 &f状态!"
-  alreadyOnBoost: "%plugin_prefix% &f你的 &e行走增速 &f已经是 &a开启 &f状态!"
-  reload: "%plugin_prefix% &6插件已重载!"
-  reloadNoPerm: "%plugin_prefix% &c你没有权限这么做!"
-  tooManyArgs: "%plugin_prefix% &c参数过多!"
-  wrongArgs: "%plugin_prefix% &c错误的参数!"
-  alreadyOnBoostOther: "%plugin_prefix% 玩家 &f%name% 的 &e行走增速 &f已经是 &a开启 &f状态了!"
-  alreadyOffBoostOther: "%plugin_prefix% 玩家 &f%name% 的 &e行走增速 &f已经是 &c关闭 &f状态了!"
-  toggledOnBoostOther: "%plugin_prefix% 玩家 %name% 的 &e行走增速 &f已 &a开启&f!"
-  toggledOffBoostOther: "%plugin_prefix% 玩家 %name% 的 &e行走增速 &f已 &c关闭&f!"
-  showing-trails: '%plugin_prefix% &e正在显示路径轨迹.'
-  showing-trails-radius: '%plugin_prefix% &e在 &6%radius% &f格半径内显示路径轨迹.'
-  second-argument-not-double: '%plugin_prefix% &c第二个参数无效. &7请指定显示轨迹的半径.'
+  alreadyMaxLevel: '<prefix> <white>这条路径已经达到最终阶段。'
+  noPerm: '<prefix> <red>你没有权限执行此操作。'
+  noPermBoost: '<prefix> <red>你没有权限切换加速。'
+  noPermOthers: '<prefix> <red>你没有权限更改其他玩家的设置。'
+  consoleSpecify: '<prefix> <red>从控制台执行时请指定玩家。'
+  toggledOn: '<prefix> <white>路径生成已<green>开启<white>。'
+  toggledOff: '<prefix> <white>路径生成已<red>关闭<white>。'
+  boostOn: '<prefix> <white>路径加速已<green>开启<white>。'
+  boostOff: '<prefix> <white>路径加速已<red>关闭<white>。'
+  toggledOnOther: '<prefix> <yellow><name><white> 的路径生成已<green>开启<white>。'
+  toggledOffOther: '<prefix> <yellow><name><white> 的路径生成已<red>关闭<white>。'
+  notPlayedBefore: '<prefix> <red>未找到玩家 <yellow><name><red>。'
+  cantCreateTrails: '<prefix> <red>你不能在这里创建路径。'
+  saveMessage: '<prefix> <green>玩家设置已保存。'
+  alreadyOff: '<prefix> <white>路径生成已经<red>关闭<white>。'
+  alreadyOn: '<prefix> <white>路径生成已经<green>开启<white>。'
+  alreadyOffBoost: '<prefix> <white>路径加速已经<red>关闭<white>。'
+  alreadyOnBoost: '<prefix> <white>路径加速已经<green>开启<white>。'
+  reload: '<prefix> <green>配置已重新加载。'
+  reloadNoPerm: '<prefix> <red>你没有权限重新加载 Trails。'
+  tooManyArgs: '<prefix> <red>参数过多。'
+  wrongArgs: '<prefix> <red>命令参数无效。'
+  alreadyOnBoostOther: '<prefix> <yellow><name><white> 的路径加速已经<green>开启<white>。'
+  alreadyOffBoostOther: '<prefix> <yellow><name><white> 的路径加速已经<red>关闭<white>。'
+  toggledOnBoostOther: '<prefix> <yellow><name><white> 的路径加速已<green>开启<white>。'
+  toggledOffBoostOther: '<prefix> <yellow><name><white> 的路径加速已<red>关闭<white>。'
+  showing-trails: '<prefix> <yellow>正在显示附近的路径。'
+  showing-trails-radius: '<prefix> <yellow>正在显示 <gold><radius> <yellow>格范围内的路径。'
+  second-argument-not-double: '<prefix> <red>半径必须是数字。'
+  only-players: '<prefix> <red>此命令只能由玩家使用。'
+  radius-out-of-range: '<prefix> <red>半径必须在 1 到 128 格之间。'
+  reloadFailed: '<prefix> <red>重新加载被拒绝：<error>'
+  trail-info: '<prefix> <yellow>步数：<white><walks><gray>，<yellow>路径：<white><trail>'
+  statusHeader: '<prefix> <gold>Trails <version> 状态'
+  statusConfig: '<gray>配置：<white>config v<config-version><gray>，trails v<trails-version>，语言格式 <locale-format>'
+  statusWorlds: '<gray>世界：<white><worlds>'
+  statusTrails: '<gray>路径定义：<white><trail-count><gray>；阶段：<white><stage-count>'
+  statusIntegrations: '<gray>集成：<white><integrations>'
+  validateOk: '<prefix> <green>配置有效：<trail-count> 个路径定义。'
+  validateFailed: '<prefix> <red>配置无效：<error>'
 lands:
   flag:
-    icon-material: DIRT_PATH
-    display-name: "&e路径生成"
+    display-name: '<yellow>路径生成'
     description:
-      - "启用该 flag 时"
-      - "将允许玩家在这个区域"
-      - "留下路径"
+      - '<gray>启用后允许玩家'
+      - '<gray>在此区域留下路径。'

@@ -1,130 +1,93 @@
-#Welcome to the Trails config.
-General:
-    ## Language files are located in /plugins/Trails/lang. Default is en-US.yml. If you edit one into a new language, try to rename the file with a language code from
-    ## https://www.alchemysoftware.com/livedocs/ezscript/Topics/Catalyst/Language.htm such as zh.yml or zh-CHS.yml for simplified Chinese for example. You can then set 
-    ## this setting here in this file to zh or zh-CHS and it will load properly. If you create a new language file, please send it to me so I can include it in future
-    ## updates of the project for all to enjoy! (Email: DrkMatr1984@aol.com)
-    Language: en-US
-    # If set to true path creation will be enabled by default for all players
-    # To turn it off execute command /trails or /trails off
-    enabled-by-default: true
-    # The same for speed boost on trails. /trails boost to switch
-    boost-enabled-by-default: true
-    # Chance to increment amount of walks while running = modifier * base chance
-    run-modifier: 1.5
-    # Do not create trails while sneaking
-    sneak-bypass: true
-    # Boost is applied gradually to reduce stutter. This value represents pause between each speed boost.
-    # 1 means boost is applied each tick (20 times per second)
-    speed-boost-interval: 1
-    # Speed increment which is applied. Base speed = 0.2
-    speed-boost-step: 0.006
-    # Some blocks may have the same material as a trail, but it was not created as one. Should speed boost be applied only on true trail blocks?
-    speed-boost-only-trails: true
-    # If this is enabled players with "trails.create-trails" permission will create trails.
-    use-permission-for-trails: false
-    # If this is enabled players with "trails.boost" will be boosted
-    use-permission-for-boost: false
-    # Immediately remove boost when stepping on non-trail block
-    immediately-remove-boost: false
-    # Tool to create trails. Right click to increment level. Requires "trails.trail-tool" permission. "trails.trail-tool.bypass-protection" allows to create trails anywhere
-    # If it is a shovel event will be cancelled
-    trail-tool: iron_shovel
-    # Tool to check block status. Right click a block to see. Requires "trails.info-tool" permission
-    info-tool: stick
-    # Should trails naturally decay? Trails will decay only in loaded chunks
-    trail-decay: true
-    # Percentage of trail blocks which should decay in each selected chunk
-    decay-fraction: 0.03
-    # Chance to select a chunk for decay of its trails
-    chunk-chance: 0.2
-    # How often decay task should run? 20 ticks = 1 second. Default = 1200 (1 minute)
-    decay-timer: 1200
-    # Minimal distance between trail block and player for a block to decay. When a player is on top of a dirt path block,
-    # for example, on its decay he can fall through the block due to height change
-    decay-distance: 5
-    # Fraction of step count to decay each time. If you have a block which is travelled a lot on it will
-    # have hundreds of step counts and natural decay will take ages. With this value you can speed it up.
-    # Decay will take 1 or more steps from block: Math.max(1, (int)(fraction*steps))
-    # Set it to 0 to always subtract 1 step
-    # values from 0 to 1 would make sense
-    step-decay-fraction: 0.1
-    # Enforce strict trail links which means that trails must start from a first material in a link. By default
-    # you can make DIRT PATH from COARSE DIRT even if coarse dirt was not a trail block before.
-    strict-links: false
-    # Particle effect to highlight trails on /trails show
-    trails-particle: NAUTILUS
-    # Worlds where trails functionality will be enabled. Put 'all' int this list to enable all worlds
-    enabled-worlds:
-    - 'all'
-# SendDenyMessage: set to true will send players a message telling them they cannot create trails in the current area if their trails are toggled on
-# and a protection plugin is blocking them.
-# The interval is to prevent message spamming. If they remain in an area where they can't create trails, the messages will be spaced apart by this interval,
-# in seconds.
-Messages:
-    SendDenyMessage: false
-    Interval: 10  
-Plugin-Integration:
-    # Towny integration now works two ways. If 'PathsInWilderness' is set to true, then players will create
-    # paths in the Wilderness unless individually toggled off. If TownyPathsPerm is set to true, players with 
-    # "trails.towny.town" will create paths anywhere in their hometown, and players with "trails.towny.nation"
-    # will create paths anywhere in their nation. Recommend setting these in Towny config permissions for 
-    # Assistant, or create your own resident type "TrailMaker" and add perms to that. If TownyPathsPerm is set to false,
-    # any player in their home town or nation will create trails in their own town or nation unless they have trails
-    # individually toggled off. Players will never create trails in towns that aren't their own town or in their Nation.
-    Towny:
-        PathsInWilderness: true
-        TownyPathsPerm: false
-    # Lands settings affect the Role Flag. Setting PathsInWilderness: 'true' will always allow paths in wilderness.
-    # Setting ApplyInSubAreas: 'true' cause the flag to also be applied in Sub Areas, not just the individual area you have toggled
-    # it on in. (Whole Towns/Lands versus individual plots).
-    # ATTENTION! Role flag is ENABLED by default for non-trusted players!
-    Lands:
-        PathsInWilderness: true
-        ApplyInSubAreas: true
-    # GriefPrevention is automatically detected. If it is found, players must have Build permission to build in a claim. If 'PathsInWilderness' is set to true,
-    # then players will create paths in the Wilderness unless individually toggled off.
-    GriefPrevention:
-        PathsInWilderness: true
-    # WorldGuard is automatically detected. Regions with the Trails flag set to false will be protected from trails. Trails flag is trails-flag. Setting 
-    # "checkBypass: 'true'" will allow OPs to use trails anywhere regardless of Region settings.
-    WorldGuard:
-        IntegrationEnabled: true
-        CheckBypass: false
-        # Should we create trails decay flag and check it before natural decay?
-        decay-flag: false
-    # LogBlock and CoreProtect settings both work the same. If set to true and LogBlock and/or CoreProtect are installed, Trails will create rollback data
-    # when blocks change using Trails. 
-    LogBlock:
-        LogPathBlocks: true
-    CoreProtect:
-        LogPathBlocks: true
-    PlayerPlot:
-        integration-enabled: true
-    RedProtect:
-        integration-enabled: true
-    Residence:
-        integration-enabled: true
-    Dynmap:
-        trails-trigger-render: true
-    
-  ##  Trails are composed of "Links" separated by a ">". Each link comprises 4 numbers: the material, walks to degrade to the next link,
-  ## the percent chance of it occurring, and speed boost (1.0 if not specified). They should follow the following format "material:walks:chance:speed_boost".
-  ## Get material names from https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Material.html
-Trails:
-    # This is a Link! Link name MUST NOT CONTAIN the symbol ":" !!
-    DirtPath: 'GRASS_BLOCK:5:100:1.0 > DIRT:5:100:1.1 > COARSE_DIRT:7:30:1.2 > DIRT_PATH:10:100:1.3'
-    # This is translated as a GRASS_BLOCK will degrade into DIRT after no more than 5 walks. After that, into COARSE_DIRT after 7 walks, but each walk has a
-    # 30% chance of counting. Finally, the COARSE_DIRT will turn into DIRT_PATH after no more than 10 walks. (The step counting system is a little strange
-    # sometimes so you may have to tinker with these numbers to get your desired results. The last number represents speed boost. Dirt path gives 130% of base speed.
-    SandPath: 'SAND:5:100:1.0 > SANDSTONE:5:30:1.3'
-    # Link may contain the same material entries
-    # You can inspect a trail block by clicking on it with info tool. If you have 2 links with the same material it may be useful
-    # DirtPath2: 'GRASS_BLOCK:5:100:1.0 > GRASS_BLOCK:5:100:1.0 > GRASS_BLOCK:5:100:1.0'
-    # You can have 2 links starting with the same material:
-    # DirtPath3: 'GRASS_BLOCK:5:100:1.0 > DIAMOND_BLOCK:5:100:1.7 > COARSE_DIRT:7:30:1.9 > DIRT_PATH:10:100:1.3'
-    # This is an example, DONT USE IT! If you do it path link will be chosen randomly with equal probability. That way you can make diverse paths with dirt path and gravel for example.
-# Data-Saving allows you to set, in minutes, how often you would like Trails to save it's internal data to disk. It saves async! :)
-# Interval in minutes. It only saves player toggles like /trails on or /trails boost on
-Data-Saving:
-    Interval: 5   
+# Trails 2.x configuration.
+# Every duration and percentage includes its unit in the key.
+config-version: 2
+
+locale: en-US
+
+commands:
+  # Optional runtime alias in addition to /trails and /paths. Use an empty value to disable it.
+  localized-alias: ''
+
+player-defaults:
+  trails-enabled: true
+  speed-boost-enabled: true
+
+worlds:
+  # all: every world; allowlist: only names below; blocklist: every world except names below.
+  mode: all
+  names: []
+
+trail-creation:
+  while-sneaking: false
+  sprint-progress-multiplier: 1.5
+  require-permission: false
+  strict-stage-order: false
+  visualization-particle: NAUTILUS
+
+speed-boost:
+  require-permission: false
+  only-created-trails: true
+  update-interval-ticks: 1
+  adjustment-step: 0.006
+  remove-immediately-off-trail: false
+
+tools:
+  # Right-click a block to advance it. Permissions: trails.trail-tool and trails.trail-tool.bypass-protection.
+  advance: IRON_SHOVEL
+  # Right-click a block to inspect its trail metadata. Permission: trails.info-tool.
+  inspect: STICK
+
+decay:
+  enabled: true
+  interval-ticks: 1200
+  chunk-selection-chance-percent: 20
+  blocks-per-chunk-percent: 3
+  minimum-player-distance-blocks: 5
+  step-counter-reduction-percent: 10
+
+messages:
+  protection-denied:
+    enabled: false
+    cooldown-seconds: 10
+
+storage:
+  player-preferences-save-interval-minutes: 5
+
+integrations:
+  towny:
+    enabled: true
+    allow-in-wilderness: true
+    permission-mode: false
+
+  lands:
+    enabled: true
+    allow-in-wilderness: true
+    apply-flag-to-subareas: true
+    flag-icon-material: DIRT_PATH
+
+  griefprevention:
+    enabled: true
+    allow-in-wilderness: true
+
+  worldguard:
+    enabled: true
+    allow-bypass: false
+    register-decay-flag: false
+
+  logblock:
+    log-block-changes: true
+
+  coreprotect:
+    log-block-changes: true
+
+  playerplot:
+    enabled: true
+
+  redprotect:
+    enabled: true
+
+  residence:
+    enabled: true
+
+  dynmap:
+    trigger-render: true

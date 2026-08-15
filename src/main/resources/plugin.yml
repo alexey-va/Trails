@@ -1,12 +1,70 @@
 name: Trails
-main: me.ccrama.Trails.Trails
-authors: [j10max, ccrama, drkmatr1984, Mr-Deej, GrocerMC]
-api-version: 1.16
-softdepend: [PlayerPlot, RedProtect, WorldGuard, WorldEdit, Towny, Lands, LogBlock, CoreProtect, PlaceholderAPI, MVdWPlaceholderAPI, GriefPrevention, Dynmap, dynmap, Residence]
-version: 1.9
-description: Naturally create paths whereever you go!
-
+version: "${version}"
+main: ru.ruscrafting.trails.TrailsPlugin
+description: Naturally creates configurable paths where players walk.
+api-version: "1.21.11"
+authors: [j10max, ccrama, drkmatr1984, Mr-Deej, GrocerMC, alexey-va]
+website: https://github.com/alexey-va/Trails
+softdepend:
+  - Lands
+  - WorldGuard
+  - CoreProtect
+  - PlaceholderAPI
+  - Towny
+  - GriefPrevention
+  - PlayerPlot
+  - RedProtect
+  - Residence
+  - LogBlock
+  - Dynmap
+commands:
+  trails:
+    description: Configure trail creation and trail speed boost.
+    usage: /trails [on|off|boost|show|reload|status|validate]
+    aliases: [paths]
 permissions:
-    trails.toggle:
-        description: Toggles a player's trails on/off
-        default: true
+  trails.toggle:
+    description: Toggle personal trail creation.
+    default: true
+  trails.other:
+    description: Toggle trail creation for another player.
+    default: op
+  trails.create-trails:
+    description: Create trails when permission-gated mode is enabled.
+    default: false
+  trails.boost:
+    description: Receive trail speed boosts when permission-gated mode is enabled.
+    default: false
+  trails.toggle-boost:
+    description: Toggle personal trail speed boost.
+    default: true
+  trails.toggle-boost.other:
+    description: Toggle trail speed boost for another player.
+    default: op
+  trails.show:
+    description: Visualize nearby trail blocks.
+    default: op
+  trails.reload:
+    description: Reload Trails configuration and locales safely.
+    default: op
+  trails.status:
+    description: Show active Trails configuration and integration status.
+    default: op
+  trails.validate:
+    description: Validate Trails configuration without applying it.
+    default: op
+  trails.trail-tool:
+    description: Advance a trail block with the configured tool.
+    default: op
+  trails.trail-tool.bypass-protection:
+    description: Use the trail tool without protection checks.
+    default: op
+  trails.info-tool:
+    description: Inspect trail metadata with the configured tool.
+    default: op
+  trails.towny.town:
+    description: Create trails in the player's home town when Towny permission mode is enabled.
+    default: false
+  trails.towny.nation:
+    description: Create trails in the player's home nation when Towny permission mode is enabled.
+    default: false

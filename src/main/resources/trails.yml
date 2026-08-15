@@ -1,0 +1,38 @@
+# Trail definitions are separate from runtime settings so they can be edited and validated independently.
+config-version: 1
+
+trails:
+  # IDs are persisted in block metadata. Rename an existing ID only when you intend to start a new trail identity.
+  DirtPath:
+    # Used when several definitions start from the same material.
+    selection-weight: 1
+    stages:
+      - material: GRASS_BLOCK
+        required-walks: 5
+        count-chance-percent: 100
+        speed-multiplier: 1.0
+
+      - material: DIRT
+        required-walks: 5
+        count-chance-percent: 100
+        speed-multiplier: 1.1
+
+      - material: COARSE_DIRT
+        required-walks: 7
+        count-chance-percent: 30
+        speed-multiplier: 1.2
+
+      # Progress fields are omitted for the terminal stage because it cannot advance further.
+      - material: DIRT_PATH
+        speed-multiplier: 1.3
+
+  SandPath:
+    selection-weight: 1
+    stages:
+      - material: SAND
+        required-walks: 5
+        count-chance-percent: 100
+        speed-multiplier: 1.0
+
+      - material: SANDSTONE
+        speed-multiplier: 1.3
