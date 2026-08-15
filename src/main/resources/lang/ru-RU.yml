@@ -49,6 +49,7 @@ messages:
   roadWorldDisabled: '<prefix> <red>Дороги выключены в этом мире.'
   roadUnknownProfile: '<prefix> <red>Неизвестный профиль дороги.'
   roadNoSurface: '<prefix> <red>Здесь не найдена безопасная поверхность для дороги.'
+  roadPreviewFallback: '<prefix> <yellow>Блоки неполной высоты (<materials>) показаны в предпросмотре полноразмерным жёлтым бетоном, чтобы ты не проваливался. При применении будут установлены настоящие блоки.'
   roadStarted: '<prefix> <green>Предпросмотр дороги <yellow><profile><green> включён. Пройди маршрут, затем выполни <yellow>/trails road commit<green>. Лимит: <limit> блоков.'
   roadNoSession: '<prefix> <red>Нет активного предпросмотра дороги.'
   roadExpired: '<prefix> <yellow>Предпросмотр дороги истёк, мир не изменён.'

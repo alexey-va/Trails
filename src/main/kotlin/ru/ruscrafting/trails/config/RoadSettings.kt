@@ -21,6 +21,9 @@ data class RoadSettings(
     val replaceableMaterials: Set<Material>,
     val profiles: Map<String, RoadProfile>,
 ) {
+    val roadMaterials: Set<Material> = profiles.values.flatMapTo(linkedSetOf()) { it.lanes }
+    val paintableMaterials: Set<Material> = replaceableMaterials + roadMaterials
+
     fun worldEnabled(name: String): Boolean = worlds.isEmpty() || worlds.any { it.equals(name, ignoreCase = true) }
 }
 

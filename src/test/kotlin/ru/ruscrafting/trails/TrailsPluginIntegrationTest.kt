@@ -2,6 +2,8 @@ package ru.ruscrafting.trails
 
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import org.bukkit.Location
 import org.bukkit.block.BlockFace
@@ -335,6 +337,8 @@ class TrailsPluginIntegrationTest :
             plugin.reloadTrails().isSuccess shouldBe true
 
             server.dispatchCommand(admin, "trails road start rustic") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage())) shouldContain "DIRT_PATH"
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage())) shouldContain "rustic"
             plugin.captureRoadMovement(admin, Location(world, 8.5, 65.0, 0.5)) shouldBe true
             server.scheduler.performTicks(5)
             world.getBlockAt(4, 64, 0).type shouldBe Material.GRASS_BLOCK
@@ -383,6 +387,31 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(2, 64, 0).type shouldBe Material.STONE_BRICKS
             world.getBlockAt(2, 64, 1).type shouldBe Material.COBBLESTONE
             plugin.inspectTrail(world.getBlockAt(2, 64, 0)) shouldBe TrailBlockState(null, 0)
+        }
+
+        "roads can start on and repaint configured road materials" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("RoadRebuilder")
+            admin.isOp = true
+            for (x in -2..4) {
+                for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.STONE_BRICKS
+            }
+            world.loadChunk(0, 0)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "boardwalk").message shouldBe "messages.roadStarted"
+            plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5)) shouldBe true
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            world.getBlockAt(2, 64, 0).type shouldBe Material.SPRUCE_PLANKS
         }
 
         "roads resync after movement beyond the configured segment limit" {

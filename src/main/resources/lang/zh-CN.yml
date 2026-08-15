@@ -49,6 +49,7 @@ messages:
   roadWorldDisabled: '<prefix> <red>此世界已禁用道路功能。'
   roadUnknownProfile: '<prefix> <red>未知的道路配置。'
   roadNoSurface: '<prefix> <red>这里没有可安全替换的地表。'
+  roadPreviewFallback: '<prefix> <yellow>非完整高度方块（<materials>）在预览中会显示为完整高度的黄色混凝土，避免掉入假碰撞；提交时仍会放置真实方块。'
   roadStarted: '<prefix> <green>正在预览道路 <yellow><profile><green>。沿路线行走，然后使用 <yellow>/trails road commit<green>。上限：<limit> 个方块。'
   roadNoSession: '<prefix> <red>没有活动的道路预览。'
   roadExpired: '<prefix> <yellow>道路预览已过期，世界未被修改。'

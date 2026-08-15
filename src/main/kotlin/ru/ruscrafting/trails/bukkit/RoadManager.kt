@@ -1,10 +1,8 @@
 package ru.ruscrafting.trails.bukkit
 
 import org.bukkit.Bukkit
-import org.bukkit.Color
 import org.bukkit.Location
 import org.bukkit.Material
-import org.bukkit.Particle
 import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.entity.Player
@@ -21,15 +19,22 @@ import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-data class RoadResult(
+data class RoadNotice(
     val message: String,
     val replacements: Map<String, String> = emptyMap(),
 )
 
-class RoadManager(
+data class RoadResult(
+    val message: String,
+    val replacements: Map<String, String> = emptyMap(),
+    val notices: List<RoadNotice> = emptyList(),
+)
+
+class RoadManager internal constructor(
     private val plugin: TrailsPlugin,
     initialSettings: RoadSettings,
     private val clockMillis: () -> Long = System::currentTimeMillis,
+    private val previewSelector: RoadPreviewSelector = RoadPreviewSelector(),
 ) {
     private var settings = initialSettings
     private val sessions = mutableMapOf<UUID, Session>()
@@ -41,6 +46,9 @@ class RoadManager(
         }
 
     fun reconfigure(newSettings: RoadSettings) {
+        sessions.entries.toList().forEach { (uuid, session) ->
+            plugin.server.getPlayer(uuid)?.let { cancelPreview(it, session) }
+        }
         sessions.clear()
         settings = newSettings
     }
@@ -56,7 +64,7 @@ class RoadManager(
         if (!settings.enabled) return RoadResult("messages.roadDisabled")
         if (!settings.worldEnabled(player.world.name)) return RoadResult("messages.roadWorldDisabled")
         val profile = settings.profiles[profileName.lowercase()] ?: return RoadResult("messages.roadUnknownProfile")
-        sessions.remove(player.uniqueId)
+        sessions.remove(player.uniqueId)?.let { cancelPreview(player, it) }
         val center = surfaceAt(player.world, player.location.blockX, player.location.blockZ, player.location.blockY - 1)
             ?: return RoadResult("messages.roadNoSurface")
         sessions[player.uniqueId] =
@@ -66,7 +74,26 @@ class RoadManager(
                 lastCenter = Surface(center.x, center.y, center.z),
                 startedAt = clockMillis(),
             )
-        return RoadResult("messages.roadStarted", mapOf("%profile%" to profile.name, "%limit%" to settings.maxPlannedBlocks.toString()))
+        val substitutedMaterials =
+            profile.lanes
+                .distinct()
+                .filter { material -> previewSelector.select(material.createBlockData(), center.location).substituted }
+        val notices =
+            if (substitutedMaterials.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(
+                    RoadNotice(
+                        "messages.roadPreviewFallback",
+                        mapOf("%materials%" to substitutedMaterials.joinToString { it.name }),
+                    ),
+                )
+            }
+        return RoadResult(
+            "messages.roadStarted",
+            mapOf("%profile%" to profile.name, "%limit%" to settings.maxPlannedBlocks.toString()),
+            notices,
+        )
     }
 
     fun capture(
@@ -104,15 +131,17 @@ class RoadManager(
                 continue
             }
             if (existing == null || abs(cell.lane) < abs(existing.lane)) {
+                val afterData = material.createBlockData()
+                val previewData = previewSelector.select(afterData, block.location).blockData
                 val planned =
                     PlannedBlock(
                         key = key,
                         lane = cell.lane,
                         beforeData = existing?.beforeData ?: block.blockData.asString,
-                        afterData = material.createBlockData().asString,
-                        preview = previewData(material),
+                        afterData = afterData.asString,
                     )
                 session.planned[key] = planned
+                player.sendBlockChange(block.location, previewData)
             }
         }
         session.lastCenter = current
@@ -173,6 +202,10 @@ class RoadManager(
             return RoadResult("messages.roadCommitFailed")
         }
         sessions.remove(player.uniqueId)
+        applied.forEach { change ->
+            val block = world.getBlockAt(change.x, change.y, change.z)
+            player.sendBlockChange(block.location, Bukkit.createBlockData(change.afterData))
+        }
         return RoadResult(
             if (session.capped) "messages.roadCommittedCapped" else "messages.roadCommitted",
             mapOf("%count%" to applied.size.toString()),
@@ -181,11 +214,12 @@ class RoadManager(
 
     fun cancel(player: Player): RoadResult {
         val session = sessions.remove(player.uniqueId) ?: return RoadResult("messages.roadNoSession")
+        cancelPreview(player, session)
         return RoadResult("messages.roadCancelled", mapOf("%count%" to session.planned.size.toString()))
     }
 
     fun discard(player: Player) {
-        sessions.remove(player.uniqueId)
+        sessions.remove(player.uniqueId)?.let { cancelPreview(player, it) }
     }
 
     fun undo(player: Player): RoadResult {
@@ -247,21 +281,25 @@ class RoadManager(
             val player = plugin.server.getPlayer(uuid)
             if (expired(session)) {
                 sessions.remove(uuid)
-                player?.let { plugin.message(it, "messages.roadExpired") }
-            } else if (player != null) {
-                renderPreview(player, session)
+                player?.let {
+                    cancelPreview(it, session)
+                    plugin.message(it, "messages.roadExpired")
+                }
             }
         }
     }
 
     fun close() {
+        sessions.entries.toList().forEach { (uuid, session) ->
+            plugin.server.getPlayer(uuid)?.let { cancelPreview(it, session) }
+        }
         sessions.clear()
     }
 
     private fun validCurrent(pair: Pair<Block, PlannedBlock>): Boolean {
         val (block, planned) = pair
         return block.blockData.asString == planned.beforeData &&
-            block.type in settings.replaceableMaterials &&
+            block.type in settings.paintableMaterials &&
             clearAbove(block)
     }
 
@@ -283,7 +321,7 @@ class RoadManager(
             .map { referenceY + it }
             .filter { it >= world.minHeight && it < world.maxHeight - 1 }
             .map { world.getBlockAt(x, it, z) }
-            .firstOrNull { block -> block.type in settings.replaceableMaterials && clearAbove(block) }
+            .firstOrNull { block -> block.type in settings.paintableMaterials && clearAbove(block) }
     }
 
     private fun clearAbove(block: Block): Boolean =
@@ -337,7 +375,7 @@ class RoadManager(
         }
     }
 
-    private fun renderPreview(
+    private fun cancelPreview(
         player: Player,
         session: Session,
     ) {
@@ -345,18 +383,8 @@ class RoadManager(
         if (player.world.uid != world.uid) return
         session.planned.values.forEach { planned ->
             if (world.isChunkLoaded(planned.key.x shr 4, planned.key.z shr 4)) {
-                player.spawnParticle(
-                    Particle.DUST,
-                    planned.key.x + 0.5,
-                    planned.key.y + 1.08,
-                    planned.key.z + 0.5,
-                    1,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    planned.preview,
-                )
+                val block = world.getBlockAt(planned.key.x, planned.key.y, planned.key.z)
+                player.sendBlockChange(block.location, block.blockData)
             }
         }
     }
@@ -386,22 +414,6 @@ class RoadManager(
         return (from.y + (to.y - from.y) * progress).roundToInt()
     }
 
-    private fun previewData(material: Material): Particle.DustOptions {
-        val name = material.name
-        val color =
-            when {
-                "MOSS" in name -> Color.fromRGB(92, 128, 62)
-                "PATH" in name -> Color.fromRGB(181, 140, 74)
-                "DIRT" in name || "PODZOL" in name || "MUD" in name -> Color.fromRGB(139, 94, 60)
-                "SAND" in name -> Color.fromRGB(219, 199, 139)
-                "PLANK" in name || "WOOD" in name -> Color.fromRGB(184, 135, 81)
-                "BLACKSTONE" in name -> Color.fromRGB(67, 55, 67)
-                "STONE" in name || "COBBLE" in name || "GRAVEL" in name -> Color.fromRGB(145, 145, 145)
-                else -> Color.fromRGB(80, 200, 220)
-            }
-        return Particle.DustOptions(color, 1.25f)
-    }
-
     private fun expired(session: Session): Boolean =
         clockMillis() - session.startedAt >= settings.previewExpirySeconds * 1000L
 
@@ -422,7 +434,6 @@ class RoadManager(
         val lane: Int,
         val beforeData: String,
         val afterData: String,
-        val preview: Particle.DustOptions,
     )
 
     private data class Session(

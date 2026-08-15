@@ -49,6 +49,7 @@ messages:
   roadWorldDisabled: '<prefix> <red>Roads are disabled in this world.'
   roadUnknownProfile: '<prefix> <red>Unknown road profile.'
   roadNoSurface: '<prefix> <red>No safe replaceable surface was found here.'
+  roadPreviewFallback: '<prefix> <yellow>Non-full-height blocks (<materials>) use full-height yellow concrete in the preview so you cannot fall into fake collision. Commit still places the real blocks.'
   roadStarted: '<prefix> <green>Previewing road profile <yellow><profile><green>. Walk the route, then use <yellow>/trails road commit<green>. Limit: <limit> blocks.'
   roadNoSession: '<prefix> <red>No active road preview.'
   roadExpired: '<prefix> <yellow>The road preview expired without changing the world.'

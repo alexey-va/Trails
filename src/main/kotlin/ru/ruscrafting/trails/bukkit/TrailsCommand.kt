@@ -258,9 +258,13 @@ class TrailsCommand(
                 "undo" -> plugin.roadUndo(target)
                 else -> plugin.roadStatus(target)
             }
-        plugin.message(sender, result.message, result.replacements + ("%name%" to target.name))
-        if (target !== sender && action != "status") {
-            plugin.message(target, result.message, result.replacements + ("%name%" to target.name))
+        val messages = result.notices + RoadNotice(result.message, result.replacements)
+        messages.forEach { notice ->
+            val replacements = notice.replacements + ("%name%" to target.name)
+            plugin.message(sender, notice.message, replacements)
+            if (target !== sender && action != "status") {
+                plugin.message(target, notice.message, replacements)
+            }
         }
     }
 
