@@ -55,8 +55,10 @@ building; this probe can be disabled under `integrations.protection-events` if a
 Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition without a hard dependency. Natural
 decay uses `BlockFadeEvent`. Ordinary step-counter increments do not emit world-change events.
 
-Roads are disabled by default and require `trails.roads.manage` (operator by default). Preview blocks are sent only
-to the builder and never touch the world. Commit rechecks loaded chunks, exact block snapshots, the replaceable
+Roads are disabled by default and require `trails.roads.manage` (operator by default). A colored particle preview is
+sent only to the builder and never changes client or server block collision. Movement samples up to the configured
+segment distance are connected continuously, with interpolated surface height; longer or steeper jumps safely start
+a new segment. Commit rechecks loaded chunks, exact block snapshots, the replaceable
 surface allowlist, headroom, and protection events before applying the whole plan on the server thread. A failed
 apply is rolled back; the last commit for up to 10 builders is stored atomically in `road-history.yml`. Undo succeeds
 only while every road block still exactly matches the committed snapshot, so it cannot overwrite later edits.
@@ -67,7 +69,7 @@ only while every road block still exactly matches the committed snapshot, so it 
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.1.0.jar`.
+The deployable JAR is written to `build/libs/Trails-2.1.1.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

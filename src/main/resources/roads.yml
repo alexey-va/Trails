@@ -9,6 +9,10 @@ limits:
   max-planned-blocks: 256
   preview-expiry-seconds: 300
   surface-search-depth: 2
+  # Fill a continuous road when movement events arrive several blocks apart. Larger jumps start a new segment.
+  max-segment-distance-blocks: 16
+  # Prevent a sudden vertical move from painting through cliffs or floors.
+  max-segment-height-difference-blocks: 4
 
 # Roads only repaint these safe surface blocks. Containers, ores, structures, liquids, and air are never selected.
 replaceable-materials:
@@ -21,6 +25,30 @@ replaceable-materials:
   - DIRT_PATH
 
 profiles:
+  footpath:
+    lanes: [DIRT_PATH]
+
   rustic:
     # Left edge, center, right edge. Width must be odd and no greater than 7.
     lanes: [COARSE_DIRT, DIRT_PATH, COARSE_DIRT]
+
+  country_lane:
+    lanes: [DIRT, COARSE_DIRT, DIRT_PATH, COARSE_DIRT, DIRT]
+
+  gravel:
+    lanes: [COARSE_DIRT, GRAVEL, COARSE_DIRT]
+
+  cobblestone:
+    lanes: [COBBLESTONE, STONE_BRICKS, COBBLESTONE]
+
+  mossy_stone:
+    lanes: [MOSS_BLOCK, MOSSY_COBBLESTONE, STONE_BRICKS, MOSSY_COBBLESTONE, MOSS_BLOCK]
+
+  boardwalk:
+    lanes: [OAK_PLANKS, SPRUCE_PLANKS, OAK_PLANKS]
+
+  sandstone:
+    lanes: [SANDSTONE, SMOOTH_SANDSTONE, SANDSTONE]
+
+  nether:
+    lanes: [BLACKSTONE, POLISHED_BLACKSTONE_BRICKS, BLACKSTONE]

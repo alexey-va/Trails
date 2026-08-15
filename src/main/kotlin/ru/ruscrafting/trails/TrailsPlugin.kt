@@ -65,7 +65,7 @@ open class TrailsPlugin : JavaPlugin() {
     private var speedTask: BukkitTask? = null
     private var preferenceSaveTask: BukkitTask? = null
     private var decayScheduler: DecayScheduler? = null
-    private var roadExpiryTask: BukkitTask? = null
+    private var roadMaintenanceTask: BukkitTask? = null
     private lateinit var commandHandler: TrailsCommand
     private var localeCommand: Command? = null
     private val toolKindKey by lazy { NamespacedKey(this, "trail_tool_kind") }
@@ -98,12 +98,12 @@ open class TrailsPlugin : JavaPlugin() {
             }
         blockStore = CustomBlockTrailStore(this)
         val loadedSettings = loadSettings(reload = true)
-        val loadedRoadSettings = loadRoadSettings(reload = true, trailsSettings = loadedSettings)
+        val loadedRoadSettings = loadRoadSettings(reload = true)
         val loadedLocale = loadLocale(loadedSettings)
         applyRuntime(loadedSettings, loadedLocale)
         roadSettings = loadedRoadSettings
         roadManager = RoadManager(this, loadedRoadSettings)
-        roadExpiryTask = server.scheduler.runTaskTimer(this, Runnable(roadManager::expireSessions), 20L, 20L)
+        roadMaintenanceTask = server.scheduler.runTaskTimer(this, Runnable(roadManager::tick), 5L, 5L)
         runCatching { Metrics(this, BSTATS_PLUGIN_ID) }
             .onFailure { logger.warning("bStats could not initialize and will be skipped: ${it.message}") }
 
@@ -123,8 +123,8 @@ open class TrailsPlugin : JavaPlugin() {
     override fun onDisable() {
         restoreAllSpeeds()
         if (::roadManager.isInitialized) roadManager.close()
-        roadExpiryTask?.cancel()
-        roadExpiryTask = null
+        roadMaintenanceTask?.cancel()
+        roadMaintenanceTask = null
         cancelRuntimeTasks()
         if (::preferences.isInitialized) {
             runCatching { preferences.close() }.onFailure { logger.severe("Could not save players.yml: ${it.message}") }
@@ -138,7 +138,7 @@ open class TrailsPlugin : JavaPlugin() {
     fun reloadTrails(): Result<Unit> =
         runCatching {
             val loadedSettings = loadSettings(reload = true)
-            val loadedRoadSettings = loadRoadSettings(reload = true, trailsSettings = loadedSettings)
+            val loadedRoadSettings = loadRoadSettings(reload = true)
             val loadedLocale = loadLocale(loadedSettings)
             applyRuntime(loadedSettings, loadedLocale)
             roadSettings = loadedRoadSettings
@@ -152,7 +152,7 @@ open class TrailsPlugin : JavaPlugin() {
     fun validateConfiguration(): Result<TrailsSettings> =
         runCatching {
             val loadedSettings = loadSettings(reload = true)
-            loadRoadSettings(reload = true, trailsSettings = loadedSettings)
+            loadRoadSettings(reload = true)
             loadLocale(loadedSettings)
             loadedSettings
         }
@@ -398,15 +398,9 @@ open class TrailsPlugin : JavaPlugin() {
             commandName = settings.commandAlias ?: "trails",
         )
 
-    private fun loadRoadSettings(
-        reload: Boolean,
-        trailsSettings: TrailsSettings,
-    ): RoadSettings {
+    private fun loadRoadSettings(reload: Boolean): RoadSettings {
         if (reload) roadsFile.reload()
-        return RoadSettingsLoader.load(
-            roadsFile,
-            trailsSettings.definitions.flatMap { definition -> definition.stages.map { it.material } }.toSet(),
-        )
+        return RoadSettingsLoader.load(roadsFile)
     }
 
     private fun applyRuntime(newSettings: TrailsSettings, newLocale: LocaleService) {

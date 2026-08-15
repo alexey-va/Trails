@@ -16,6 +16,8 @@ data class RoadSettings(
     val maxPlannedBlocks: Int,
     val previewExpirySeconds: Long,
     val surfaceSearchDepth: Int,
+    val maxSegmentDistanceBlocks: Int,
+    val maxSegmentHeightDifferenceBlocks: Int,
     val replaceableMaterials: Set<Material>,
     val profiles: Map<String, RoadProfile>,
 ) {
@@ -27,7 +29,6 @@ object RoadSettingsLoader {
 
     fun load(
         config: YamlConfig,
-        allowedTrailMaterials: Set<String>? = null,
     ): RoadSettings {
         val problems = mutableListOf<String>()
         val version = integer(config, "config-version", CONFIG_VERSION, problems)
@@ -39,6 +40,12 @@ object RoadSettingsLoader {
         if (expiry !in 10..3600) problems += "limits.preview-expiry-seconds must be between 10 and 3600"
         val depth = integer(config, "limits.surface-search-depth", 2, problems)
         if (depth !in 0..8) problems += "limits.surface-search-depth must be between 0 and 8"
+        val maxSegmentDistance = integer(config, "limits.max-segment-distance-blocks", 16, problems)
+        if (maxSegmentDistance !in 1..64) problems += "limits.max-segment-distance-blocks must be between 1 and 64"
+        val maxSegmentHeightDifference = integer(config, "limits.max-segment-height-difference-blocks", 4, problems)
+        if (maxSegmentHeightDifference !in 0..16) {
+            problems += "limits.max-segment-height-difference-blocks must be between 0 and 16"
+        }
         val enabled = boolean(config, "enabled", false, problems)
 
         val rawReplaceable = config.stringList("replaceable-materials")
@@ -65,9 +72,6 @@ object RoadSettingsLoader {
                 if (!material.isBlock || !material.isSolid || material.isAir) {
                     problems += "profiles.$rawName.lanes uses non-solid block material '${material.name}'"
                 }
-                if (allowedTrailMaterials != null && material.name !in allowedTrailMaterials) {
-                    problems += "profiles.$rawName.lanes material '${material.name}' must be present in trails.yml"
-                }
             }
             profiles[name] = RoadProfile(name, lanes)
         }
@@ -83,6 +87,8 @@ object RoadSettingsLoader {
             maxPlannedBlocks = maxBlocks,
             previewExpirySeconds = expiry.toLong(),
             surfaceSearchDepth = depth,
+            maxSegmentDistanceBlocks = maxSegmentDistance,
+            maxSegmentHeightDifferenceBlocks = maxSegmentHeightDifference,
             replaceableMaterials = replaceable,
             profiles = profiles,
         )
