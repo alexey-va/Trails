@@ -46,13 +46,26 @@ persistent tag and activate the listeners, so ordinary sticks and shovels are ig
 players with `trails.info-tool` or `trails.trail-tool`; both are granted by default, while protection checks remain
 active for the advance tool.
 
+Protection has three modes under `integrations.protection.mode`:
+
+- `bukkit-event` fires a cancellable `EntityChangeBlockEvent` with the exact target material, followed by a
+  compatibility `BlockPlaceEvent` for classic claim plugins, immediately before an actual trail material change.
+  Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition without a hard dependency.
+- `plugin-api` preserves the explicit Towny, Lands, GriefPrevention, WorldGuard, PlayerPlot, RedProtect, and Residence
+  adapters and their Trails-specific options.
+- `both` requires both checks to allow the change.
+
+Fresh configurations use `bukkit-event`; migrated 1.x configurations retain `plugin-api` behavior. The generic event
+is not fired for ordinary step-counter increments, only for a material transition, and a cancellation leaves both the
+block and its stored trail stage unchanged.
+
 ## Build
 
 ```bash
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.0.1.jar`.
+The deployable JAR is written to `build/libs/Trails-2.0.2.jar`.
 
 The Gradle wrapper is pinned to 9.5.0 with its official distribution checksum. Dependency and plugin versions are
 centralized in `gradle/libs.versions.toml`; Maven repositories are restricted to the groups they are expected to

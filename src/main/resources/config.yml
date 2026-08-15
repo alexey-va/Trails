@@ -54,6 +54,10 @@ storage:
   player-preferences-save-interval-minutes: 5
 
 integrations:
+  protection:
+    # plugin-api: explicit hooks below; bukkit-event: universal cancellable change/place events; both: require both.
+    mode: bukkit-event
+
   towny:
     enabled: true
     allow-in-wilderness: true

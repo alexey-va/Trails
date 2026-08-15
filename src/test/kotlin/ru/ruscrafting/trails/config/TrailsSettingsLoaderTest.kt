@@ -24,6 +24,7 @@ class TrailsSettingsLoaderTest :
                 settings.integrations.logBlockChanges shouldBe false
                 settings.integrations.coreProtectChanges shouldBe true
                 settings.integrations.redProtectEnabled shouldBe false
+                settings.integrations.protectionMode shouldBe ProtectionMode.BUKKIT_EVENT
                 settings.worldMode shouldBe WorldMode.ALLOWLIST
                 settings.worldEnabled("survival") shouldBe true
                 settings.worldEnabled("world") shouldBe false
@@ -117,6 +118,23 @@ class TrailsSettingsLoaderTest :
                 folder.toFile().deleteRecursively()
             }
         }
+
+        "rejects an unknown protection mode" {
+            val folder = Files.createTempDirectory("trails-settings-")
+            try {
+                writeValidConfiguration(folder)
+                Files.writeString(
+                    folder.resolve("config.yml"),
+                    Files.readString(folder.resolve("config.yml")).replace("    mode: bukkit-event", "    mode: magic"),
+                )
+
+                val error = shouldThrow<TrailsSettingsException> { load(folder) }
+
+                error.problems shouldContain "integrations.protection.mode must be one of: plugin-api, bukkit-event, both"
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
     }) {
     companion object {
         private val materials = setOf("AIR", "GRASS_BLOCK", "DIRT", "DIRT_PATH", "IRON_SHOVEL", "STICK")
@@ -172,6 +190,8 @@ class TrailsSettingsLoaderTest :
                 storage:
                   player-preferences-save-interval-minutes: 5
                 integrations:
+                  protection:
+                    mode: bukkit-event
                   towny:
                     enabled: true
                     allow-in-wilderness: true

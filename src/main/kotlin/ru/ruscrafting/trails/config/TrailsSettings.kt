@@ -13,6 +13,15 @@ enum class WorldMode {
     BLOCKLIST,
 }
 
+enum class ProtectionMode(
+    val usesPluginApi: Boolean,
+    val usesBukkitEvent: Boolean,
+) {
+    PLUGIN_API(usesPluginApi = true, usesBukkitEvent = false),
+    BUKKIT_EVENT(usesPluginApi = false, usesBukkitEvent = true),
+    BOTH(usesPluginApi = true, usesBukkitEvent = true),
+}
+
 data class TrailsSettings(
     val configVersion: Int,
     val trailsConfigVersion: Int,
@@ -66,6 +75,7 @@ data class TrailsSettings(
 }
 
 data class IntegrationSettings(
+    val protectionMode: ProtectionMode,
     val townyEnabled: Boolean,
     val townyPathsInWilderness: Boolean,
     val townyPermissionMode: Boolean,
@@ -135,6 +145,16 @@ object TrailsSettingsLoader {
         val trailTool = itemMaterial("tools.advance", config, "IRON_SHOVEL", materialExists, problems)
         val infoTool = itemMaterial("tools.inspect", config, "STICK", materialExists, problems)
         val landsFlagIcon = enumValue("integrations.lands.flag-icon-material", config, "DIRT_PATH", materialExists, problems, "material")
+        val protectionMode =
+            when (config.string("integrations.protection.mode", "plugin-api").trim().lowercase()) {
+                "plugin-api" -> ProtectionMode.PLUGIN_API
+                "bukkit-event" -> ProtectionMode.BUKKIT_EVENT
+                "both" -> ProtectionMode.BOTH
+                else -> {
+                    problems += "integrations.protection.mode must be one of: plugin-api, bukkit-event, both"
+                    ProtectionMode.PLUGIN_API
+                }
+            }
 
         val definitions =
             try {
@@ -177,6 +197,7 @@ object TrailsSettingsLoader {
                 saveIntervalMinutes = positiveLong(config, "storage.player-preferences-save-interval-minutes", 5L, problems),
                 integrations =
                     IntegrationSettings(
+                        protectionMode = protectionMode,
                         townyEnabled = boolean(config, "integrations.towny.enabled", true, problems),
                         townyPathsInWilderness = boolean(config, "integrations.towny.allow-in-wilderness", true, problems),
                         townyPermissionMode = boolean(config, "integrations.towny.permission-mode", false, problems),
@@ -408,6 +429,7 @@ object LegacyTrailsSettingsLoader {
                 saveIntervalMinutes = positiveLong("Data-Saving.Interval", 5L),
                 integrations =
                     IntegrationSettings(
+                        protectionMode = ProtectionMode.PLUGIN_API,
                         townyEnabled = true,
                         townyPathsInWilderness = config.boolean("Plugin-Integration.Towny.PathsInWilderness", true),
                         townyPermissionMode = config.boolean("Plugin-Integration.Towny.TownyPathsPerm", false),

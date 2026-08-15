@@ -99,6 +99,7 @@ class LegacyConfigMigrator(
             set("messages.protection-denied.cooldown-seconds", settings.denyMessageIntervalSeconds)
             set("storage.player-preferences-save-interval-minutes", settings.saveIntervalMinutes)
             with(settings.integrations) {
+                set("integrations.protection.mode", "plugin-api")
                 set("integrations.towny.enabled", townyEnabled)
                 set("integrations.towny.allow-in-wilderness", townyPathsInWilderness)
                 set("integrations.towny.permission-mode", townyPermissionMode)

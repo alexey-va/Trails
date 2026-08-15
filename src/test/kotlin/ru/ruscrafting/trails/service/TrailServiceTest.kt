@@ -55,6 +55,25 @@ class TrailServiceTest :
             store.read(block) shouldBe TrailBlockState(identity = null, walks = 1)
         }
 
+        "a denied transition leaves the block and stored stage unchanged" {
+            val block = mockk<Block>(relaxed = true)
+            every { block.type } returns Material.GRASS_BLOCK
+            val player = mockk<Player>()
+            every { player.name } returns "ProtectedWalker"
+            every { player.isSprinting } returns false
+            val store = InMemoryTrailBlockStore()
+            val service = service(store)
+
+            service.walk(player, block, sprintModifier = 1.5) shouldBe true
+            service.walk(player, block, sprintModifier = 1.5) { target ->
+                target shouldBe Material.DIRT
+                false
+            } shouldBe false
+
+            verify(exactly = 0) { block.setType(any<Material>(), any<Boolean>()) }
+            store.read(block) shouldBe TrailBlockState(TrailIdentity("DirtPath", 0), 1)
+        }
+
         "only-trails boost ignores matching natural materials" {
             val block = mockk<Block>()
             every { block.type } returns Material.GRASS_BLOCK

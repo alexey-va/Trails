@@ -26,6 +26,7 @@ import ru.ruscrafting.trails.config.TrailsSettings
 import ru.ruscrafting.trails.config.TrailsSettingsLoader
 import ru.ruscrafting.trails.config.YamlConfig
 import ru.ruscrafting.trails.domain.TrailCatalog
+import ru.ruscrafting.trails.integration.BukkitEventProtection
 import ru.ruscrafting.trails.integration.CoreProtectObserver
 import ru.ruscrafting.trails.integration.DecayPolicy
 import ru.ruscrafting.trails.integration.DynmapObserver
@@ -56,6 +57,7 @@ open class TrailsPlugin : JavaPlugin() {
     private lateinit var blockStore: CustomBlockTrailStore
     private lateinit var trailService: TrailService
     private var protection: ProtectionPolicy = ProtectionPolicy.ALLOW_ALL
+    private val bukkitEventProtection by lazy { BukkitEventProtection(server.pluginManager) }
     private var decayPolicy: DecayPolicy = DecayPolicy.ALLOW_ALL
     private var worldGuard: WorldGuardProtection? = null
     private var lands: LandsProtection? = null
@@ -89,7 +91,8 @@ open class TrailsPlugin : JavaPlugin() {
         val loadLocale = loadLocale(loadSettings)
         if (
             server.pluginManager.getPlugin("WorldGuard") != null &&
-            loadSettings.integrations.worldGuardEnabled
+            loadSettings.integrations.worldGuardEnabled &&
+            (loadSettings.integrations.protectionMode.usesPluginApi || loadSettings.integrations.worldGuardDecayFlag)
         ) {
             worldGuard =
                 WorldGuardProtection(
@@ -97,7 +100,11 @@ open class TrailsPlugin : JavaPlugin() {
                     checkBypass = loadSettings.integrations.worldGuardCheckBypass,
                 )
         }
-        if (loadSettings.integrations.landsEnabled && server.pluginManager.getPlugin("Lands") != null) {
+        if (
+            loadSettings.integrations.protectionMode.usesPluginApi &&
+            loadSettings.integrations.landsEnabled &&
+            server.pluginManager.getPlugin("Lands") != null
+        ) {
             lands = LandsProtection(this, loadSettings.integrations, loadLocale)
         }
     }
@@ -200,14 +207,19 @@ open class TrailsPlugin : JavaPlugin() {
         if (!trailService.canAffect(block)) return
         val canCreate =
             if (settings.usePermissionForTrails) player.hasPermission("trails.create-trails") else trailsEnabled(player.uniqueId)
-        if (!canCreate || !checkProtection(player, block)) return
-        trailService.walk(player, block, settings.runModifier)
+        if (!canCreate || !checkPluginProtection(player, block)) return
+        trailService.walk(player, block, settings.runModifier) { target ->
+            checkEventProtection(player, block, target)
+        }
     }
 
     fun forceTrail(player: Player, block: Block) {
         if (!settings.worldEnabled(block.world.name) || !trailService.canAffect(block)) return
-        if (!player.hasPermission("trails.trail-tool.bypass-protection") && !checkProtection(player, block)) return
-        trailService.walk(player, block, settings.runModifier, forced = true)
+        val bypass = player.hasPermission("trails.trail-tool.bypass-protection")
+        if (!bypass && !checkPluginProtection(player, block)) return
+        trailService.walk(player, block, settings.runModifier, forced = true) { target ->
+            bypass || checkEventProtection(player, block, target)
+        }
     }
 
     fun decayBlock(block: Block): Boolean =
@@ -372,6 +384,7 @@ open class TrailsPlugin : JavaPlugin() {
         settings: TrailsSettings,
         worldGuard: WorldGuardProtection?,
     ): ProtectionPolicy {
+        if (!settings.integrations.protectionMode.usesPluginApi) return ProtectionPolicy.ALLOW_ALL
         val manager = server.pluginManager
         val policies = mutableListOf<ProtectionPolicy>()
         if (settings.integrations.townyEnabled) {
@@ -461,8 +474,20 @@ open class TrailsPlugin : JavaPlugin() {
         speedController.restoreAll(online)
     }
 
-    private fun checkProtection(player: Player, block: Block): Boolean {
-        if (protection.canCreate(player, block.location)) return true
+    private fun checkPluginProtection(player: Player, block: Block): Boolean =
+        !settings.integrations.protectionMode.usesPluginApi ||
+            checkProtectionResult(player, protection.canCreate(player, block.location))
+
+    private fun checkEventProtection(
+        player: Player,
+        block: Block,
+        target: Material,
+    ): Boolean =
+        !settings.integrations.protectionMode.usesBukkitEvent ||
+            checkProtectionResult(player, bukkitEventProtection.canChange(player, block, target))
+
+    private fun checkProtectionResult(player: Player, allowed: Boolean): Boolean {
+        if (allowed) return true
         if (settings.sendDenyMessage && denyMessageCooldown.add(player.uniqueId)) {
             message(player, "messages.cantCreateTrails")
             server.scheduler.runTaskLater(
@@ -514,15 +539,16 @@ open class TrailsPlugin : JavaPlugin() {
             }
         val configured = settings.integrations
         return listOf(
-            "Towny=${state(configured.townyEnabled, "Towny")}",
-            "Lands=${state(configured.landsEnabled, "Lands")}",
-            "GriefPrevention=${state(configured.griefPreventionEnabled, "GriefPrevention")}",
-            "WorldGuard=${state(configured.worldGuardEnabled, "WorldGuard")}",
+            "Protection=${configured.protectionMode.name.lowercase().replace('_', '-')}",
+            "Towny=${state(configured.protectionMode.usesPluginApi && configured.townyEnabled, "Towny")}",
+            "Lands=${state(configured.protectionMode.usesPluginApi && configured.landsEnabled, "Lands")}",
+            "GriefPrevention=${state(configured.protectionMode.usesPluginApi && configured.griefPreventionEnabled, "GriefPrevention")}",
+            "WorldGuard=${state(configured.protectionMode.usesPluginApi && configured.worldGuardEnabled, "WorldGuard")}",
             "CoreProtect=${state(configured.coreProtectChanges, "CoreProtect")}",
             "LogBlock=${state(configured.logBlockChanges, "LogBlock")}",
-            "PlayerPlot=${state(configured.playerPlotEnabled, "PlayerPlot")}",
-            "RedProtect=${state(configured.redProtectEnabled, "RedProtect")}",
-            "Residence=${state(configured.residenceEnabled, "Residence")}",
+            "PlayerPlot=${state(configured.protectionMode.usesPluginApi && configured.playerPlotEnabled, "PlayerPlot")}",
+            "RedProtect=${state(configured.protectionMode.usesPluginApi && configured.redProtectEnabled, "RedProtect")}",
+            "Residence=${state(configured.protectionMode.usesPluginApi && configured.residenceEnabled, "Residence")}",
             "Dynmap=${state(configured.dynmapRender, "dynmap", "Dynmap")}",
             "PlaceholderAPI=${state(true, "PlaceholderAPI")}",
         ).joinToString(", ")

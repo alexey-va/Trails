@@ -4,8 +4,12 @@ import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Material
 import org.bukkit.block.BlockFace
+import org.bukkit.event.EventPriority
+import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
+import org.bukkit.event.block.BlockPlaceEvent
+import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
@@ -100,6 +104,75 @@ class TrailsPluginIntegrationTest :
             block.type shouldBe Material.DIRT
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
             plugin.inspectTrail(block)?.walks shouldBe 0
+        }
+
+        "bukkit-event protection fires only for the material transition and respects cancellation" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("ProtectedWalker")
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            var changeCalls = 0
+            var placeCalls = 0
+            val listener = object : Listener {}
+            server.pluginManager.registerEvent(
+                EntityChangeBlockEvent::class.java,
+                listener,
+                EventPriority.NORMAL,
+                { _, raw ->
+                    val event = raw as EntityChangeBlockEvent
+                    changeCalls++
+                    event.entity shouldBe player
+                    event.block shouldBe block
+                    event.to shouldBe Material.DIRT
+                },
+                plugin,
+            )
+            server.pluginManager.registerEvent(
+                BlockPlaceEvent::class.java,
+                listener,
+                EventPriority.NORMAL,
+                { _, raw ->
+                    val event = raw as BlockPlaceEvent
+                    placeCalls++
+                    event.player shouldBe player
+                    event.block shouldBe block
+                    event.itemInHand.type shouldBe Material.DIRT
+                    event.isCancelled = true
+                },
+                plugin,
+            )
+
+            repeat(4) { plugin.handleMovement(player, block) }
+            changeCalls shouldBe 0
+            placeCalls shouldBe 0
+            plugin.inspectTrail(block)?.walks shouldBe 4
+
+            plugin.handleMovement(player, block)
+
+            changeCalls shouldBe 1
+            placeCalls shouldBe 1
+            block.type shouldBe Material.GRASS_BLOCK
+            plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:0"
+            plugin.inspectTrail(block)?.walks shouldBe 4
+        }
+
+        "bukkit-event protection treats canBuild false as a veto" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("BuildDeniedWalker")
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val listener = object : Listener {}
+            server.pluginManager.registerEvent(
+                BlockPlaceEvent::class.java,
+                listener,
+                EventPriority.NORMAL,
+                { _, raw -> (raw as BlockPlaceEvent).setBuild(false) },
+                plugin,
+            )
+
+            repeat(5) { plugin.handleMovement(player, block) }
+
+            block.type shouldBe Material.GRASS_BLOCK
+            plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:0"
+            plugin.inspectTrail(block)?.walks shouldBe 4
         }
 
         "creation respects the personal toggle, sneak bypass, and enabled worlds" {

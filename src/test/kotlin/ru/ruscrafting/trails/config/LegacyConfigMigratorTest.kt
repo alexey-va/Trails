@@ -33,6 +33,7 @@ class LegacyConfigMigratorTest :
                 migrated.enabledWorlds shouldBe setOf("survival")
                 migrated.decayFraction shouldBe 0.03
                 migrated.chunkChance shouldBe 0.2
+                migrated.integrations.protectionMode shouldBe ProtectionMode.PLUGIN_API
                 migrated.definitions.single().name shouldBe "DirtPath"
                 migrated.definitions.single().stages.last().speedMultiplier shouldBe 1.1
 

@@ -25,6 +25,7 @@ class TrailService(
         block: Block,
         sprintModifier: Double,
         forced: Boolean = false,
+        canChange: (Material) -> Boolean = { true },
     ): Boolean {
         val stored = store.read(block)
         val stage = catalog.resolve(block.type.name, stored?.identity) ?: return false
@@ -44,7 +45,9 @@ class TrailService(
                 true
             }
             is ProgressDecision.Advanced -> {
-                changeMaterial(player.name, block, Material.valueOf(decision.to.material))
+                val material = Material.valueOf(decision.to.material)
+                if (!canChange(material)) return false
+                changeMaterial(player.name, block, material)
                 store.write(block, TrailBlockState(decision.to.identity, 0))
                 true
             }
