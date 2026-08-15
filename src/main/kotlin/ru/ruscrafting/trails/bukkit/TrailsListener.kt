@@ -47,15 +47,18 @@ class TrailsListener(
         if (event.action != Action.RIGHT_CLICK_BLOCK || event.hand != EquipmentSlot.HAND) return
         val item = event.item ?: return
         val block = event.clickedBlock ?: return
-        when {
-            item.type == plugin.settings.trailToolMaterial && event.player.hasPermission("trails.trail-tool") -> {
+        when (plugin.toolKind(item)) {
+            TrailToolKind.ADVANCE -> {
+                if (!event.player.hasPermission("trails.trail-tool")) return
                 plugin.forceTrail(event.player, block)
                 if (item.type.name.endsWith("_SHOVEL")) event.isCancelled = true
             }
-            item.type == plugin.settings.infoToolMaterial && event.player.hasPermission("trails.info-tool") -> {
+            TrailToolKind.INSPECT -> {
+                if (!event.player.hasPermission("trails.info-tool")) return
                 plugin.showTrailInfo(event.player, block)
                 if (item.type.name.endsWith("_SHOVEL")) event.isCancelled = true
             }
+            null -> Unit
         }
     }
 

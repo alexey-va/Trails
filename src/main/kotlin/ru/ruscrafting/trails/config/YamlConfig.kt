@@ -142,17 +142,21 @@ class YamlConfig(
     private fun copyBundledDefault() {
         val target = folder.resolve(relativePath)
         if (Files.exists(target)) return
-        val loader = Thread.currentThread().contextClassLoader ?: javaClass.classLoader
-        loader.getResourceAsStream(relativePath)?.use { source ->
+        bundledResource()?.use { source ->
             Files.createDirectories(target.parent)
             Files.copy(source, target)
         }
     }
 
     private fun loadBundledDefaults(): YamlConfiguration? {
-        val loader = Thread.currentThread().contextClassLoader ?: javaClass.classLoader
-        return loader.getResourceAsStream(relativePath)?.use { source ->
+        return bundledResource()?.use { source ->
             InputStreamReader(source, StandardCharsets.UTF_8).use(YamlConfiguration::loadConfiguration)
         }
     }
+
+    private fun bundledResource() =
+        javaClass.classLoader.getResourceAsStream(relativePath)
+            ?: Thread.currentThread().contextClassLoader
+                ?.takeUnless { it === javaClass.classLoader }
+                ?.getResourceAsStream(relativePath)
 }

@@ -25,6 +25,7 @@ class TrailsCommand(
             "reload" -> reload(sender, args.size)
             "status" -> status(sender, args.size)
             "validate" -> validate(sender, args.size)
+            "give" -> give(sender, args.drop(1))
             else -> if (args.size == 1) toggleOther(sender, args[0]) else plugin.message(sender, "messages.wrongArgs")
         }
         return true
@@ -46,6 +47,7 @@ class TrailsCommand(
                         if (sender.hasPermission("trails.reload")) add("reload")
                         if (sender.hasPermission("trails.status")) add("status")
                         if (sender.hasPermission("trails.validate")) add("validate")
+                        if (sender.hasPermission("trails.tools.give")) add("give")
                         if (sender.hasPermission("trails.other")) addAll(otherPlayers(sender))
                     }
                 2 ->
@@ -53,9 +55,15 @@ class TrailsCommand(
                         "on", "off" -> if (sender.hasPermission("trails.other")) otherPlayers(sender) else emptyList()
                         "boost" -> listOf("on", "off") + if (sender.hasPermission("trails.toggle-boost.other")) otherPlayers(sender) else emptyList()
                         "show" -> listOf("30")
+                        "give" -> if (sender.hasPermission("trails.tools.give")) TrailToolKind.entries.map { it.id } else emptyList()
                         else -> emptyList()
                     }
-                3 -> if (args[0].equals("boost", true) && sender.hasPermission("trails.toggle-boost.other")) otherPlayers(sender) else emptyList()
+                3 ->
+                    when {
+                        args[0].equals("boost", true) && sender.hasPermission("trails.toggle-boost.other") -> otherPlayers(sender)
+                        args[0].equals("give", true) && sender.hasPermission("trails.tools.give") -> plugin.server.onlinePlayers.map(Player::getName)
+                        else -> emptyList()
+                    }
                 else -> emptyList()
             }
         val prefix = args.lastOrNull().orEmpty()
@@ -192,6 +200,28 @@ class TrailsCommand(
                     mapOf("%error%" to (error.message ?: error.javaClass.simpleName)),
                 )
             }
+    }
+
+    private fun give(sender: CommandSender, args: List<String>) {
+        if (!sender.hasPermission("trails.tools.give")) return plugin.message(sender, "messages.noPerm")
+        if (args.size !in 1..2) return plugin.message(sender, "messages.wrongArgs")
+        val kind = TrailToolKind.fromId(args[0].lowercase()) ?: return plugin.message(sender, "messages.wrongArgs")
+        val targetName = args.getOrNull(1)
+        val target =
+            when {
+                targetName != null ->
+                    plugin.server.getPlayerExact(targetName)
+                        ?: return plugin.message(sender, "messages.playerNotOnline", mapOf("%name%" to targetName))
+                sender is Player -> sender
+                else -> return plugin.message(sender, "messages.consoleSpecify")
+            }
+        if (!plugin.giveTool(target, kind)) {
+            plugin.message(sender, "messages.inventoryFull", mapOf("%name%" to target.name))
+            return
+        }
+        val replacements = mapOf("%name%" to target.name, "%tool%" to plugin.toolLabel(kind))
+        plugin.message(sender, "messages.toolGiven", replacements)
+        if (target !== sender) plugin.message(target, "messages.toolReceived", replacements)
     }
 
     private fun otherPlayers(sender: CommandSender): List<String> =

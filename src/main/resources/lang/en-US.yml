@@ -41,6 +41,19 @@ messages:
   statusIntegrations: '<gray>Integrations: <white><integrations>'
   validateOk: '<prefix> <green>Configuration is valid: <trail-count> trail definitions.'
   validateFailed: '<prefix> <red>Configuration is invalid: <error>'
+  playerNotOnline: '<prefix> <red>Player <yellow><name> <red>is not online.'
+  inventoryFull: '<prefix> <red>Player <yellow><name> <red>has no inventory space.'
+  toolGiven: '<prefix> <green>Gave the <yellow><tool> <green>to <yellow><name><green>.'
+  toolReceived: '<prefix> <green>You received the <yellow><tool><green>.'
+tools:
+  advance:
+    label: 'trail advancer'
+    name: '<gold>Trail Advancer'
+    lore: '<gray>Right-click a block to advance it to the next trail stage.'
+  inspect:
+    label: 'trail inspector'
+    name: '<gold>Trail Inspector'
+    lore: '<gray>Right-click a block to show its walk count and trail stage.'
 lands:
   flag:
     display-name: '<gold>Create trails'

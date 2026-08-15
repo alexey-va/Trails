@@ -41,6 +41,19 @@ messages:
   statusIntegrations: '<gray>Интеграции: <white><integrations>'
   validateOk: '<prefix> <green>Конфигурация корректна: <trail-count> определений троп.'
   validateFailed: '<prefix> <red>Ошибка конфигурации: <error>'
+  playerNotOnline: '<prefix> <red>Игрок <yellow><name> <red>не в сети.'
+  inventoryFull: '<prefix> <red>В инвентаре игрока <yellow><name> <red>нет места.'
+  toolGiven: '<prefix> <green>Инструмент <yellow><tool> <green>выдан игроку <yellow><name><green>.'
+  toolReceived: '<prefix> <green>Вы получили инструмент <yellow><tool><green>.'
+tools:
+  advance:
+    label: 'прокладчик троп'
+    name: '<gold>Прокладчик троп'
+    lore: '<gray>ПКМ по блоку: перейти к следующей стадии тропы.'
+  inspect:
+    label: 'инспектор троп'
+    name: '<gold>Инспектор троп'
+    lore: '<gray>ПКМ по блоку: показать накопленные шаги и стадию.'
 lands:
   flag:
     display-name: '<gold>Создание троп'

@@ -132,8 +132,8 @@ object TrailsSettingsLoader {
         if (worldMode != WorldMode.ALL && worlds.isEmpty()) problems += "worlds.names must not be empty when worlds.mode is not all"
 
         val particle = enumValue("trail-creation.visualization-particle", config, "NAUTILUS", particleExists, problems, "particle")
-        val trailTool = enumValue("tools.advance", config, "IRON_SHOVEL", materialExists, problems, "material")
-        val infoTool = enumValue("tools.inspect", config, "STICK", materialExists, problems, "material")
+        val trailTool = itemMaterial("tools.advance", config, "IRON_SHOVEL", materialExists, problems)
+        val infoTool = itemMaterial("tools.inspect", config, "STICK", materialExists, problems)
         val landsFlagIcon = enumValue("integrations.lands.flag-icon-material", config, "DIRT_PATH", materialExists, problems, "material")
 
         val definitions =
@@ -205,6 +205,19 @@ object TrailsSettingsLoader {
     private fun positiveLong(config: YamlConfig, path: String, default: Long, problems: MutableList<String>): Long {
         val value = integer(config, path, default, problems)
         if (value <= 0) problems += "$path must be positive"
+        return value
+    }
+
+    private fun itemMaterial(
+        path: String,
+        config: YamlConfig,
+        default: String,
+        materialExists: (String) -> Boolean,
+        problems: MutableList<String>,
+    ): String {
+        val value = enumValue(path, config, default, materialExists, problems, "material")
+        val material = Material.valueOf(value)
+        if (!material.isItem || material.isAir) problems += "$path must be an inventory item material"
         return value
     }
 
@@ -329,10 +342,15 @@ object LegacyTrailsSettingsLoader {
             return value
         }
 
-        fun material(path: String, default: String): String {
+        fun material(path: String, default: String, itemOnly: Boolean = false): String {
             val value = config.string(path, default).trim().uppercase()
             if (!materialExists(value)) {
                 problems += "$path uses unknown material '$value'"
+                return default
+            }
+            val material = Material.valueOf(value)
+            if (itemOnly && (!material.isItem || material.isAir)) {
+                problems += "$path must be an inventory item material"
                 return default
             }
             return value
@@ -373,8 +391,8 @@ object LegacyTrailsSettingsLoader {
                 usePermissionForTrails = config.boolean("General.use-permission-for-trails", false),
                 usePermissionForBoost = config.boolean("General.use-permission-for-boost", false),
                 immediatelyRemoveBoost = config.boolean("General.immediately-remove-boost", false),
-                trailTool = material("General.trail-tool", "IRON_SHOVEL"),
-                infoTool = material("General.info-tool", "STICK"),
+                trailTool = material("General.trail-tool", "IRON_SHOVEL", itemOnly = true),
+                infoTool = material("General.info-tool", "STICK", itemOnly = true),
                 trailDecay = config.boolean("General.trail-decay", true),
                 decayFraction = doubleInRange("General.decay-fraction", 0.03, 0.0..1.0),
                 chunkChance = doubleInRange("General.chunk-chance", 0.2, 0.0..1.0),

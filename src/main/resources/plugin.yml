@@ -20,7 +20,7 @@ softdepend:
 commands:
   trails:
     description: Configure trail creation and trail speed boost.
-    usage: /trails [on|off|boost|show|reload|status|validate]
+    usage: /trails [on|off|boost|show|reload|status|validate|give]
     aliases: [paths]
 permissions:
   trails.toggle:
@@ -53,15 +53,18 @@ permissions:
   trails.validate:
     description: Validate Trails configuration without applying it.
     default: op
+  trails.tools.give:
+    description: Give tagged Trails inspect or advance tools.
+    default: op
   trails.trail-tool:
     description: Advance a trail block with the configured tool.
-    default: op
+    default: true
   trails.trail-tool.bypass-protection:
     description: Use the trail tool without protection checks.
     default: op
   trails.info-tool:
     description: Inspect trail metadata with the configured tool.
-    default: op
+    default: true
   trails.towny.town:
     description: Create trails in the player's home town when Towny permission mode is enabled.
     default: false

@@ -3,9 +3,15 @@ package ru.ruscrafting.trails
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Material
+import org.bukkit.block.BlockFace
+import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
+import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.inventory.EquipmentSlot
+import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
+import ru.ruscrafting.trails.bukkit.TrailToolKind
 import ru.ruscrafting.trails.integration.TrailsPlaceholderExpansion
 import java.nio.file.Files
 
@@ -156,6 +162,52 @@ class TrailsPluginIntegrationTest :
 
             server.pluginManager.callEvent(BlockBreakEvent(block, player))
             plugin.inspectTrail(block) shouldBe null
+        }
+
+        "only tagged command-issued tools trigger trail actions" {
+            val world = server.addSimpleWorld("world")
+            val admin = server.addPlayer("ToolAdmin")
+            admin.isOp = true
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+
+            server.pluginManager.callEvent(
+                PlayerInteractEvent(
+                    admin,
+                    Action.RIGHT_CLICK_BLOCK,
+                    ItemStack(Material.IRON_SHOVEL),
+                    block,
+                    BlockFace.UP,
+                    EquipmentSlot.HAND,
+                ),
+            )
+            plugin.inspectTrail(block) shouldBe null
+
+            server.dispatchCommand(admin, "trails give advance") shouldBe true
+            val tagged = admin.inventory.contents.filterNotNull().single { plugin.toolKind(it) == TrailToolKind.ADVANCE }
+            server.pluginManager.callEvent(
+                PlayerInteractEvent(
+                    admin,
+                    Action.RIGHT_CLICK_BLOCK,
+                    tagged,
+                    block,
+                    BlockFace.UP,
+                    EquipmentSlot.HAND,
+                ),
+            )
+
+            block.type shouldBe Material.DIRT
+            plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
+        }
+
+        "give command requires permission and can target an online player" {
+            val regular = server.addPlayer("Regular")
+            val target = server.addPlayer("ToolTarget")
+
+            server.dispatchCommand(regular, "trails give inspect") shouldBe true
+            regular.inventory.contents.filterNotNull().size shouldBe 0
+
+            server.dispatchCommand(server.consoleSender, "trails give inspect ToolTarget") shouldBe true
+            target.inventory.contents.filterNotNull().single().let(plugin::toolKind) shouldBe TrailToolKind.INSPECT
         }
 
         "status and validate commands expose the active v2 configuration" {

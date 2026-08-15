@@ -19,6 +19,8 @@ class LocaleParityTest :
                 russian.keys("lands.flag") shouldContainExactlyInAnyOrder english.keys("lands.flag")
                 chinese.keys("messages") shouldContainExactlyInAnyOrder english.keys("messages")
                 chinese.keys("lands.flag") shouldContainExactlyInAnyOrder english.keys("lands.flag")
+                russian.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
+                chinese.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
 
                 val locale = LocaleService.load(folder, "ru-RU", "trails")
                 locale.formatName shouldBe "minimessage"
@@ -52,6 +54,30 @@ class LocaleParityTest :
                 locale.renderLegacy("messages.trail-info", mapOf("%walks%" to "3", "%trail%" to "DirtPath:1")) shouldContain "DirtPath:1"
                 Files.readString(legacyFile) shouldBe original
             } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
+
+        "bundled locale fallback does not depend on the server thread context classloader" {
+            val folder = Files.createTempDirectory("trails-context-loader-locale-")
+            val thread = Thread.currentThread()
+            val previousLoader = thread.contextClassLoader
+            try {
+                val localeFolder = Files.createDirectories(folder.resolve("lang"))
+                Files.writeString(
+                    localeFolder.resolve("ru-RU.yml"),
+                    "format: minimessage\nplugin-prefix: '<yellow>Тропы <gray>»'\n",
+                )
+                thread.contextClassLoader = object : ClassLoader(null) {}
+
+                val locale = LocaleService.load(folder, "ru-RU", "trails")
+
+                locale.renderLegacy(
+                    "messages.trail-info",
+                    mapOf("%walks%" to "3", "%trail%" to "DirtPath:1"),
+                ) shouldContain "DirtPath:1"
+            } finally {
+                thread.contextClassLoader = previousLoader
                 folder.toFile().deleteRecursively()
             }
         }

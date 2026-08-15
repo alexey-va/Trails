@@ -41,6 +41,19 @@ messages:
   statusIntegrations: '<gray>集成：<white><integrations>'
   validateOk: '<prefix> <green>配置有效：<trail-count> 个路径定义。'
   validateFailed: '<prefix> <red>配置无效：<error>'
+  playerNotOnline: '<prefix> <red>玩家 <yellow><name> <red>不在线。'
+  inventoryFull: '<prefix> <red>玩家 <yellow><name> <red>的背包没有空位。'
+  toolGiven: '<prefix> <green>已将 <yellow><tool> <green>给予 <yellow><name><green>。'
+  toolReceived: '<prefix> <green>你获得了 <yellow><tool><green>。'
+tools:
+  advance:
+    label: '路径推进工具'
+    name: '<gold>路径推进工具'
+    lore: '<gray>右键方块：推进到下一路径阶段。'
+  inspect:
+    label: '路径检查工具'
+    name: '<gold>路径检查工具'
+    lore: '<gray>右键方块：显示步数和路径阶段。'
 lands:
   flag:
     display-name: '<yellow>路径生成'

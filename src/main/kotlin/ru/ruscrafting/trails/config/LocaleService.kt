@@ -69,6 +69,8 @@ class LocaleService private constructor(
         replacements: Map<String, String> = emptyMap(),
     ): List<String> = renderValueList(path, replacements).map(SECTION::serialize)
 
+    fun plain(path: String): String = config.stringOrNull(path) ?: path
+
     private fun renderValue(
         path: String,
         replacements: Map<String, String> = emptyMap(),

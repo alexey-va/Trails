@@ -81,6 +81,23 @@ class TrailsSettingsLoaderTest :
             }
         }
 
+        "rejects air as a configured issued tool" {
+            val folder = Files.createTempDirectory("trails-settings-")
+            try {
+                writeValidConfiguration(folder)
+                Files.writeString(
+                    folder.resolve("config.yml"),
+                    Files.readString(folder.resolve("config.yml")).replace("  inspect: STICK", "  inspect: AIR"),
+                )
+
+                val error = shouldThrow<TrailsSettingsException> { load(folder) }
+
+                error.problems shouldContain "tools.inspect must be an inventory item material"
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
+
         "rejects malformed numbers and booleans instead of silently using defaults" {
             val folder = Files.createTempDirectory("trails-settings-")
             try {
@@ -102,7 +119,7 @@ class TrailsSettingsLoaderTest :
         }
     }) {
     companion object {
-        private val materials = setOf("GRASS_BLOCK", "DIRT", "DIRT_PATH", "IRON_SHOVEL", "STICK")
+        private val materials = setOf("AIR", "GRASS_BLOCK", "DIRT", "DIRT_PATH", "IRON_SHOVEL", "STICK")
 
         private fun load(folder: java.nio.file.Path): TrailsSettings =
             TrailsSettingsLoader.load(

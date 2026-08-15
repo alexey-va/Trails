@@ -38,6 +38,13 @@ Useful operator commands:
 - `/trails reload` validates and atomically applies both configuration files.
 - `/trails validate` validates files on disk without applying them.
 - `/trails status` shows schema versions, world scope, loaded definitions, and integration state.
+- `/trails give inspect [player]` gives the tagged inspection stick.
+- `/trails give advance [player]` gives the tagged trail-advance shovel.
+
+Giving tools requires `trails.tools.give` (operator by default). Only items issued by Trails carry the required
+persistent tag and activate the listeners, so ordinary sticks and shovels are ignored. Tagged tools can be used by
+players with `trails.info-tool` or `trails.trail-tool`; both are granted by default, while protection checks remain
+active for the advance tool.
 
 ## Build
 
@@ -45,7 +52,7 @@ Useful operator commands:
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.0.0.jar`.
+The deployable JAR is written to `build/libs/Trails-2.0.1.jar`.
 
 The Gradle wrapper is pinned to 9.5.0 with its official distribution checksum. Dependency and plugin versions are
 centralized in `gradle/libs.versions.toml`; Maven repositories are restricted to the groups they are expected to

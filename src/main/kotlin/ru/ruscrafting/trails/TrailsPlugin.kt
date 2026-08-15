@@ -4,11 +4,14 @@ import net.coreprotect.CoreProtect
 import net.kyori.adventure.text.Component
 import org.bstats.bukkit.Metrics
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.Particle
 import org.bukkit.block.Block
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
+import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
@@ -16,6 +19,7 @@ import ru.ruscrafting.trails.bukkit.BukkitWalkSpeedTarget
 import ru.ruscrafting.trails.bukkit.DecayScheduler
 import ru.ruscrafting.trails.bukkit.TrailsCommand
 import ru.ruscrafting.trails.bukkit.TrailsListener
+import ru.ruscrafting.trails.bukkit.TrailToolKind
 import ru.ruscrafting.trails.config.LocaleService
 import ru.ruscrafting.trails.config.LegacyConfigMigrator
 import ru.ruscrafting.trails.config.TrailsSettings
@@ -63,6 +67,7 @@ open class TrailsPlugin : JavaPlugin() {
     private var decayScheduler: DecayScheduler? = null
     private lateinit var commandHandler: TrailsCommand
     private var localeCommand: Command? = null
+    private val toolKindKey by lazy { NamespacedKey(this, "trail_tool_kind") }
 
     override fun onLoad() {
         saveDefaultConfig()
@@ -223,6 +228,35 @@ open class TrailsPlugin : JavaPlugin() {
             ),
         )
     }
+
+    fun createTool(kind: TrailToolKind): ItemStack {
+        val material =
+            when (kind) {
+                TrailToolKind.ADVANCE -> settings.trailToolMaterial
+                TrailToolKind.INSPECT -> settings.infoToolMaterial
+            }
+        val item = ItemStack(material)
+        val meta = item.itemMeta
+        meta.itemName(locale.render("tools.${kind.id}.name"))
+        meta.lore(listOf(locale.render("tools.${kind.id}.lore")))
+        meta.persistentDataContainer.set(toolKindKey, PersistentDataType.STRING, kind.id)
+        meta.setEnchantmentGlintOverride(true)
+        item.itemMeta = meta
+        return item
+    }
+
+    fun toolKind(item: ItemStack): TrailToolKind? =
+        item.itemMeta
+            ?.persistentDataContainer
+            ?.get(toolKindKey, PersistentDataType.STRING)
+            ?.let(TrailToolKind::fromId)
+
+    fun giveTool(
+        player: Player,
+        kind: TrailToolKind,
+    ): Boolean = player.inventory.addItem(createTool(kind)).isEmpty()
+
+    fun toolLabel(kind: TrailToolKind): String = locale.plain("tools.${kind.id}.label")
 
     fun showTrails(player: Player, radius: Double) {
         val center = player.location
@@ -503,7 +537,7 @@ open class TrailsPlugin : JavaPlugin() {
     ) : Command(name) {
         init {
             description = "Configure trail creation and trail speed boost."
-            usage = "/$name [on|off|boost|show|reload|status|validate]"
+            usage = "/$name [on|off|boost|show|reload|status|validate|give]"
         }
 
         override fun execute(
