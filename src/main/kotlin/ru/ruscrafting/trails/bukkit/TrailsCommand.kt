@@ -58,14 +58,15 @@ class TrailsCommand(
                         "boost" -> listOf("on", "off") + if (sender.hasPermission("trails.toggle-boost.other")) otherPlayers(sender) else emptyList()
                         "show" -> listOf("30")
                         "give" -> if (sender.hasPermission("trails.tools.give")) TrailToolKind.entries.map { it.id } else emptyList()
-                        "road" -> if (sender.hasPermission("trails.roads.manage")) listOf("start", "commit", "cancel", "undo", "status") else emptyList()
+                        "road" -> if (sender.hasPermission("trails.roads.manage")) listOf("list", "start", "commit", "cancel", "undo", "status") else emptyList()
                         else -> emptyList()
                     }
                 3 ->
                     when {
                         args[0].equals("boost", true) && sender.hasPermission("trails.toggle-boost.other") -> otherPlayers(sender)
                         args[0].equals("give", true) && sender.hasPermission("trails.tools.give") -> plugin.server.onlinePlayers.map(Player::getName)
-                        args[0].equals("road", true) && args[1].equals("start", true) -> plugin.roadProfiles().toList()
+                        args[0].equals("road", true) &&
+                            (args[1].equals("start", true) || args[1].equals("list", true)) -> plugin.roadProfiles().toList()
                         args[0].equals("road", true) -> plugin.server.onlinePlayers.map(Player::getName)
                         else -> emptyList()
                     }
@@ -238,6 +239,13 @@ class TrailsCommand(
     private fun road(sender: CommandSender, args: List<String>) {
         if (!sender.hasPermission("trails.roads.manage")) return plugin.message(sender, "messages.noPerm")
         val action = args.firstOrNull()?.lowercase() ?: return plugin.message(sender, "messages.wrongArgs")
+        if (action == "list") {
+            if (args.size !in 1..2) return plugin.message(sender, "messages.wrongArgs")
+            if (!plugin.showRoadProfiles(sender, args.getOrNull(1))) {
+                plugin.message(sender, "messages.roadUnknownProfile")
+            }
+            return
+        }
         val target =
             when (action) {
                 "start" -> {

@@ -85,6 +85,17 @@ class YamlConfig(
 
     fun keys(path: String): Set<String> = lock.read { yaml.getConfigurationSection(path)?.getKeys(false).orEmpty() }
 
+    fun explicitKeys(path: String): Set<String> =
+        lock.read {
+            val prefix = "$path."
+            explicitPaths
+                .asSequence()
+                .filter { it.startsWith(prefix) }
+                .map { it.removePrefix(prefix).substringBefore('.') }
+                .filter(String::isNotEmpty)
+                .toCollection(linkedSetOf())
+        }
+
     fun value(path: String): Any? = lock.read { yaml.get(path).toYamlValue() }
 
     @Suppress("UNCHECKED_CAST")

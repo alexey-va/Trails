@@ -15,11 +15,11 @@ Claim plugins are supported through cancellable Bukkit events instead of private
 
 ## Configuration
 
-Trails 2.1 uses three versioned operator files:
+Trails 2.2 uses three versioned operator files:
 
 - `config.yml` contains gameplay, world, storage, command, and integration settings.
 - `trails.yml` contains structured, weighted trail definitions and their stages.
-- `roads.yml` contains the opt-in Roads safety limits, world allowlist, replaceable surfaces, and profiles.
+- `roads.yml` contains the opt-in Roads safety limits, world allowlist, weighted palettes, periodic forms, and profiles.
 
 Every duration and percentage states its unit in the key. Trail IDs such as `DirtPath` are persisted in block
 metadata and should not be renamed casually.
@@ -41,6 +41,7 @@ Useful operator commands:
 - `/trails status` shows schema versions, world scope, loaded definitions, and integration state.
 - `/trails give inspect [player]` gives the tagged inspection stick.
 - `/trails give advance [player]` gives the tagged trail-advance shovel.
+- `/trails road list [profile]` shows localized descriptions for all road profiles or one selected profile.
 - `/trails road start <profile> [player]` starts a client-only road preview while the player walks.
 - `/trails road commit [player]`, `cancel`, `status`, and `undo` manage the bounded road plan.
 
@@ -56,15 +57,34 @@ Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition wi
 decay uses `BlockFadeEvent`. Ordinary step-counter increments do not emit world-change events.
 
 Roads are disabled by default and require `trails.roads.manage` (operator by default). A fake-block preview is sent
-only to the builder and never changes server blocks. Materials without a full-cube collision shape, such as
-`DIRT_PATH`, are announced in chat and represented by full-height yellow concrete in the preview so their fake
-collision cannot trap the client; commit still places the selected real material. Movement samples up to the configured
-segment distance are connected continuously, with interpolated surface height; longer or steeper jumps safely start
-a new segment. Existing materials from any configured road profile are valid starting and repainting surfaces. Commit
-rechecks loaded chunks, exact block snapshots, the paintable surface allowlist, headroom, and protection events before
-applying the whole plan on the server thread. A failed
-apply is rolled back; the last commit for up to 10 builders is stored atomically in `road-history.yml`. Undo succeeds
-only while every road block still exactly matches the committed snapshot, so it cannot overwrite later edits.
+only to the builder and never changes server blocks. Its default budget is 2048 blocks for 10 minutes. Materials
+without a full-cube collision shape, such as `DIRT_PATH`, stairs, slabs, fences, and lanterns, are announced in chat
+and represented by full-height yellow concrete in the preview so fake collision cannot trap the client; commit still
+places the selected real block data.
+
+Movement samples up to the configured segment distance are connected continuously over the nearest safe surface.
+Flying is captured by default when terrain is within the configured search depth. A longer jump still paints its
+landing row instead of silently losing the road; teleports cancel the session. `safe-solid` replacement accepts
+ordinary solid terrain, including stone, while always excluding block entities, ores, liquids, waterlogged blocks,
+unbreakable and technical blocks, plus the configurable protected list. The legacy explicit allowlist mode remains
+available.
+
+Each lane and height transition accepts either one material or a weighted map whose integer percentages total 100,
+for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. The selection is stable for the lifetime of one preview.
+One-block height changes can use bottom slabs or direction-aware bottom stairs; stairs face along the road toward the
+higher end. Periodic forms are reusable rotated structures with forward, lateral, and vertical offsets. Their interval,
+side alternation, placements, and weighted materials are configurable. The bundled `lantern_lane` profile places an
+alternating cobblestone-wall, fence, and lantern post every 12 blocks. The bundled catalog now contains 21 profiles,
+including forest, cherry, alpine, royal, ancient-tuff, frozen, badlands, volcanic, prismarine, End, and soul-lit
+themes. Forms must remain outside road lanes and are skipped as a whole if any target is occupied or the complete
+form would exceed the preview limit.
+
+Commit rechecks loaded chunks, exact block snapshots, surface safety, headroom, form space, and protection events
+before applying the whole plan on the server thread. A failed apply is rolled back. Survival builders with
+`trails.roads.collect-drops` can receive removed ordinary blocks when the option is enabled; inventory overflow is
+dropped at the builder and owner-locked. A compensated commit is deliberately not undoable, preventing item
+duplication. Other last commits for up to 10 builders are stored atomically in `road-history.yml`; undo succeeds only
+while every road block still exactly matches the committed snapshot, so it cannot overwrite later edits.
 
 ## Build
 
@@ -72,7 +92,7 @@ only while every road block still exactly matches the committed snapshot, so it 
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.1.3.jar`.
+The deployable JAR is written to `build/libs/Trails-2.2.0.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

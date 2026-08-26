@@ -1,10 +1,11 @@
 package ru.ruscrafting.trails.bukkit
 
 import org.bukkit.Bukkit
+import org.bukkit.GameMode
 import org.bukkit.Location
-import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.Block
+import org.bukkit.block.data.BlockData
 import org.bukkit.entity.Player
 import ru.ruscrafting.trails.TrailsPlugin
 import ru.ruscrafting.trails.config.RoadProfile
@@ -37,6 +38,7 @@ class RoadManager internal constructor(
     private val previewSelector: RoadPreviewSelector = RoadPreviewSelector(),
 ) {
     private var settings = initialSettings
+    private var surfacePolicy = RoadSurfacePolicy(initialSettings)
     private val sessions = mutableMapOf<UUID, Session>()
     private val historyStore = RoadHistoryStore(plugin.dataFolder.toPath())
     private val history =
@@ -51,6 +53,7 @@ class RoadManager internal constructor(
         }
         sessions.clear()
         settings = newSettings
+        surfacePolicy = RoadSurfacePolicy(newSettings)
     }
 
     fun profiles(): Collection<String> = settings.profiles.keys
@@ -67,16 +70,22 @@ class RoadManager internal constructor(
         sessions.remove(player.uniqueId)?.let { cancelPreview(player, it) }
         val center = surfaceAt(player.world, player.location.blockX, player.location.blockZ, player.location.blockY - 1)
             ?: return RoadResult("messages.roadNoSurface")
-        sessions[player.uniqueId] =
+        val session =
             Session(
                 worldId = player.world.uid,
                 profile = profile,
                 lastCenter = Surface(center.x, center.y, center.z),
                 startedAt = clockMillis(),
             )
+        sessions[player.uniqueId] = session
         val substitutedMaterials =
-            profile.lanes
-                .distinct()
+            (
+                profile.laneMaterials +
+                    settings.heightTransitionPalette(profile)?.materials.orEmpty() +
+                    profile.decorationPatterns.flatMap { pattern ->
+                        pattern.placements.flatMap { it.palette.materials }
+                    }
+            ).distinct()
                 .filter { material -> previewSelector.select(material.createBlockData(), center.location).substituted }
         val notices =
             if (substitutedMaterials.isEmpty()) {
@@ -101,6 +110,7 @@ class RoadManager internal constructor(
         location: Location,
     ): Boolean {
         val session = sessions[player.uniqueId] ?: return false
+        if (player.isFlying && !settings.captureWhileFlying) return true
         if (expired(session) || location.world?.uid != session.worldId) {
             cancel(player)
             return false
@@ -110,40 +120,11 @@ class RoadManager internal constructor(
         val previous = session.lastCenter
         if (current.x == previous.x && current.z == previous.z) return true
         if (!withinSegmentLimits(previous, current)) {
+            planSegment(player, session, previous, current, onlyLastRow = true)
             session.lastCenter = current
             return true
         }
-        val cells =
-            RoadGeometry.segment(
-                RoadPoint(previous.x, previous.z),
-                RoadPoint(current.x, current.z),
-                session.profile.width,
-            )
-        for (cell in cells) {
-            val laneIndex = cell.lane + session.profile.width / 2
-            val material = session.profile.lanes[laneIndex]
-            val block = surfaceAt(player.world, cell.x, cell.z, interpolatedY(previous, current, cell.x, cell.z)) ?: continue
-            if (block.type == material) continue
-            val key = BlockKey(block.x, block.y, block.z)
-            val existing = session.planned[key]
-            if (existing == null && session.planned.size >= settings.maxPlannedBlocks) {
-                session.capped = true
-                continue
-            }
-            if (existing == null || abs(cell.lane) < abs(existing.lane)) {
-                val afterData = material.createBlockData()
-                val previewData = previewSelector.select(afterData, block.location).blockData
-                val planned =
-                    PlannedBlock(
-                        key = key,
-                        lane = cell.lane,
-                        beforeData = existing?.beforeData ?: block.blockData.asString,
-                        afterData = afterData.asString,
-                    )
-                session.planned[key] = planned
-                player.sendBlockChange(block.location, previewData)
-            }
-        }
+        planSegment(player, session, previous, current)
         session.lastCenter = current
         return true
     }
@@ -160,10 +141,20 @@ class RoadManager internal constructor(
         val resolved = session.planned.values.mapNotNull { resolve(world, it) }
         if (resolved.size != session.planned.size || resolved.any { !validCurrent(it) }) return RoadResult("messages.roadConflict")
         for ((block, planned) in resolved) {
-            if (!plugin.canRoadChange(player, block, Bukkit.createBlockData(planned.afterData).material)) {
+            if (!plugin.canRoadChange(player, block, planned.afterData.material)) {
                 return RoadResult("messages.roadProtected")
             }
         }
+        val compensateRemovedBlocks =
+            settings.returnReplacedBlocksInSurvival &&
+                player.gameMode == GameMode.SURVIVAL &&
+                player.hasPermission(RETURN_BLOCKS_PERMISSION)
+        val removedMaterials =
+            if (compensateRemovedBlocks) {
+                resolved.map { (_, planned) -> Bukkit.createBlockData(planned.beforeData).material }
+            } else {
+                emptyList()
+            }
 
         val applied = mutableListOf<RoadBlockRecord>()
         try {
@@ -175,12 +166,12 @@ class RoadManager internal constructor(
                         planned.key.y,
                         planned.key.z,
                         planned.beforeData,
-                        planned.afterData,
+                        planned.afterData.asString,
                         previous,
                         TrailBlockState(null, 0),
                     )
                 applied += record
-                plugin.placeRoad(player.name, block, Bukkit.createBlockData(planned.afterData))
+                plugin.placeRoad(player.name, block, planned.afterData)
                 applied[applied.lastIndex] = record.copy(afterState = checkNotNull(plugin.inspectTrail(block)))
             }
         } catch (error: Exception) {
@@ -190,7 +181,7 @@ class RoadManager internal constructor(
         }
         val historyBefore = LinkedHashMap(history)
         history.remove(player.uniqueId)
-        history[player.uniqueId] = RoadCommitRecord(world.uid, clockMillis(), applied)
+        if (!compensateRemovedBlocks) history[player.uniqueId] = RoadCommitRecord(world.uid, clockMillis(), applied)
         while (history.size > MAX_HISTORY_PLAYERS) history.remove(history.keys.first())
         try {
             historyStore.save(history)
@@ -204,11 +195,34 @@ class RoadManager internal constructor(
         sessions.remove(player.uniqueId)
         applied.forEach { change ->
             val block = world.getBlockAt(change.x, change.y, change.z)
-            player.sendBlockChange(block.location, Bukkit.createBlockData(change.afterData))
+            player.sendBlockChange(block.location, block.blockData)
         }
+        val notices =
+            if (compensateRemovedBlocks) {
+                val delivery = RoadBlockCompensation.deliver(player, removedMaterials)
+                buildList {
+                    add(
+                        RoadNotice(
+                            "messages.roadBlocksReturned",
+                            mapOf("%count%" to delivery.returnedItems.toString()),
+                        ),
+                    )
+                    if (delivery.droppedItems > 0) {
+                        add(
+                            RoadNotice(
+                                "messages.roadBlocksDropped",
+                                mapOf("%count%" to delivery.droppedItems.toString()),
+                            ),
+                        )
+                    }
+                }
+            } else {
+                emptyList()
+            }
         return RoadResult(
             if (session.capped) "messages.roadCommittedCapped" else "messages.roadCommitted",
             mapOf("%count%" to applied.size.toString()),
+            notices,
         )
     }
 
@@ -296,11 +310,157 @@ class RoadManager internal constructor(
         sessions.clear()
     }
 
+    private fun planSegment(
+        player: Player,
+        session: Session,
+        from: Surface,
+        to: Surface,
+        onlyLastRow: Boolean = false,
+    ) {
+        val fromPoint = RoadPoint(from.x, from.z)
+        val toPoint = RoadPoint(to.x, to.z)
+        val geometryRows = RoadGeometry.rows(fromPoint, toPoint, session.profile.width)
+        val selectedRows = if (onlyLastRow) geometryRows.takeLast(1) else geometryRows
+        val rows =
+            selectedRows.map { row ->
+                val referenceY = interpolatedY(from, to, row.center.x, row.center.z)
+                ResolvedRoadRow(
+                    center = row.center,
+                    cells =
+                        row.cells.mapNotNull { cell ->
+                            surfaceAt(player.world, cell.x, cell.z, referenceY)?.let { block -> cell.lane to block }
+                        }.toMap(),
+                )
+            }
+        rows.forEach { row ->
+            row.cells.forEach { (lane, block) ->
+                val palette = session.profile.lanePalettes[lane + session.profile.width / 2]
+                val material = palette.select(paletteSample(session, block, lane, PlanRole.SURFACE))
+                planBlock(player, session, block, lane, material.createBlockData(), PlanRole.SURFACE)
+            }
+        }
+        settings.heightTransitionPalette(session.profile)?.let { transitionPalette ->
+            rows.zipWithNext().forEach { (fromRow, toRow) ->
+                fromRow.cells.keys.intersect(toRow.cells.keys).forEach { lane ->
+                    val fromBlock = fromRow.cells.getValue(lane)
+                    val toBlock = toRow.cells.getValue(lane)
+                    val heightDifference = toBlock.y - fromBlock.y
+                    if (abs(heightDifference) == 1) {
+                        val ascending = heightDifference > 0
+                        val highBlock = if (ascending) toBlock else fromBlock
+                        val transitionMaterial =
+                            transitionPalette.select(paletteSample(session, highBlock, lane, PlanRole.HEIGHT_TRANSITION))
+                        val transition =
+                            RoadHeightTransitionFactory.create(
+                                transitionMaterial,
+                                fromRow.center,
+                                toRow.center,
+                                ascending,
+                            )
+                        planBlock(player, session, highBlock, lane, transition, PlanRole.HEIGHT_TRANSITION)
+                    }
+                }
+            }
+        }
+        val newRows = if (onlyLastRow) rows else rows.drop(1)
+        newRows.forEachIndexed { index, row ->
+            val previousCenter = if (onlyLastRow) fromPoint else rows[index].center
+            planPatterns(player, session, previousCenter, row)
+        }
+    }
+
+    private fun planPatterns(
+        player: Player,
+        session: Session,
+        previousCenter: RoadPoint,
+        row: ResolvedRoadRow,
+    ) {
+        session.traversedBlocks++
+        val anchor = row.cells[0] ?: return
+        session.profile.decorationPatterns.forEach { pattern ->
+            if (session.traversedBlocks % pattern.everyBlocks != 0L) return@forEach
+            val occurrence = session.traversedBlocks / pattern.everyBlocks
+            val side = if (pattern.alternateSides && (occurrence - 1L) % 2L == 1L) -1 else 1
+            val face = RoadHeightTransitionFactory.travelFace(previousCenter, row.center)
+            val forwardX = face.modX
+            val forwardZ = face.modZ
+            val rightX = -forwardZ
+            val rightZ = forwardX
+            val targets =
+                pattern.placements.map { placement ->
+                    val lateral = placement.lateral * side
+                    val x = anchor.x + placement.forward * forwardX + lateral * rightX
+                    val y = anchor.y + placement.vertical
+                    val z = anchor.z + placement.forward * forwardZ + lateral * rightZ
+                    placement to BlockKey(x, y, z)
+                }
+            if (
+                targets.any { (_, key) ->
+                    key.y !in player.world.minHeight until player.world.maxHeight ||
+                        !player.world.isChunkLoaded(key.x shr 4, key.z shr 4) ||
+                        !player.world.getBlockAt(key.x, key.y, key.z).type.isAir ||
+                        session.planned.containsKey(key)
+                }
+            ) {
+                return@forEach
+            }
+            if (session.planned.size + targets.size > settings.maxPlannedBlocks) {
+                session.capped = true
+                return@forEach
+            }
+            targets.forEachIndexed { placementIndex, (placement, key) ->
+                val block = player.world.getBlockAt(key.x, key.y, key.z)
+                val material =
+                    placement.palette.select(
+                        paletteSample(session, block, placementIndex, PlanRole.DECORATION),
+                    )
+                planBlock(player, session, block, placementIndex, material.createBlockData(), PlanRole.DECORATION)
+            }
+        }
+    }
+
+    private fun planBlock(
+        player: Player,
+        session: Session,
+        block: Block,
+        lane: Int,
+        afterData: BlockData,
+        role: PlanRole,
+    ) {
+        val key = BlockKey(block.x, block.y, block.z)
+        val existing = session.planned[key]
+        if (existing == null && block.blockData.asString == afterData.asString) return
+        if (existing == null && session.planned.size >= settings.maxPlannedBlocks) {
+            session.capped = true
+            return
+        }
+        val shouldReplace =
+            existing == null ||
+                role.priority > existing.role.priority ||
+                (role == PlanRole.HEIGHT_TRANSITION && existing.role == role) ||
+                (role == existing.role && abs(lane) < abs(existing.lane))
+        if (!shouldReplace) return
+        val planned =
+            PlannedBlock(
+                key = key,
+                lane = lane,
+                beforeData = existing?.beforeData ?: block.blockData.asString,
+                afterData = afterData.clone(),
+                role = role,
+            )
+        session.planned[key] = planned
+        val previewData = previewSelector.select(afterData, block.location).blockData
+        player.sendBlockChange(block.location, previewData)
+    }
+
     private fun validCurrent(pair: Pair<Block, PlannedBlock>): Boolean {
         val (block, planned) = pair
-        return block.blockData.asString == planned.beforeData &&
-            block.type in settings.paintableMaterials &&
-            clearAbove(block)
+        if (block.blockData.asString != planned.beforeData) return false
+        return if (planned.role == PlanRole.DECORATION) {
+            block.type.isAir
+        } else {
+            surfacePolicy.canReplace(block) && surfacePolicy.hasWalkableTop(block)
+        }
     }
 
     private fun surfaceAt(
@@ -321,13 +481,9 @@ class RoadManager internal constructor(
             .map { referenceY + it }
             .filter { it >= world.minHeight && it < world.maxHeight - 1 }
             .map { world.getBlockAt(x, it, z) }
-            .firstOrNull { block -> block.type in settings.paintableMaterials && clearAbove(block) }
+            .firstOrNull(surfacePolicy::hasWalkableTop)
+            ?.takeIf(surfacePolicy::canReplace)
     }
-
-    private fun clearAbove(block: Block): Boolean =
-        block.getRelative(0, 1, 0).type.let { material ->
-            material.isAir || (!material.isSolid && material != Material.WATER && material != Material.LAVA)
-        }
 
     private fun resolve(world: World, planned: PlannedBlock): Pair<Block, PlannedBlock>? =
         if (world.isChunkLoaded(planned.key.x shr 4, planned.key.z shr 4)) {
@@ -414,6 +570,27 @@ class RoadManager internal constructor(
         return (from.y + (to.y - from.y) * progress).roundToInt()
     }
 
+    private fun paletteSample(
+        session: Session,
+        block: Block,
+        lane: Int,
+        role: PlanRole,
+    ): Long {
+        var value = session.paletteSeed
+        value = mix(value xor block.x.toLong())
+        value = mix(value xor block.y.toLong())
+        value = mix(value xor block.z.toLong())
+        value = mix(value xor lane.toLong())
+        return mix(value xor role.priority.toLong())
+    }
+
+    private fun mix(input: Long): Long {
+        var value = input
+        value = (value xor (value ushr 33)) * -49064778989728563L
+        value = (value xor (value ushr 33)) * -4265267296055464877L
+        return value xor (value ushr 33)
+    }
+
     private fun expired(session: Session): Boolean =
         clockMillis() - session.startedAt >= settings.previewExpirySeconds * 1000L
 
@@ -433,19 +610,34 @@ class RoadManager internal constructor(
         val key: BlockKey,
         val lane: Int,
         val beforeData: String,
-        val afterData: String,
+        val afterData: BlockData,
+        val role: PlanRole,
     )
+
+    private data class ResolvedRoadRow(
+        val center: RoadPoint,
+        val cells: Map<Int, Block>,
+    )
+
+    private enum class PlanRole(val priority: Int) {
+        SURFACE(0),
+        HEIGHT_TRANSITION(1),
+        DECORATION(2),
+    }
 
     private data class Session(
         val worldId: UUID,
         val profile: RoadProfile,
         var lastCenter: Surface,
         val startedAt: Long,
+        val paletteSeed: Long = worldId.mostSignificantBits xor worldId.leastSignificantBits xor startedAt,
         val planned: LinkedHashMap<BlockKey, PlannedBlock> = linkedMapOf(),
         var capped: Boolean = false,
+        var traversedBlocks: Long = 0,
     )
 
     private companion object {
         const val MAX_HISTORY_PLAYERS = 10
+        const val RETURN_BLOCKS_PERMISSION = "trails.roads.collect-drops"
     }
 }

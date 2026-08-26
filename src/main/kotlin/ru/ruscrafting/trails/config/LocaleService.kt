@@ -69,6 +69,8 @@ class LocaleService private constructor(
 
     fun plain(path: String): String = config.stringOrNull(path) ?: path
 
+    fun exists(path: String): Boolean = config.exists(path)
+
     private fun renderValueList(
         path: String,
         replacements: Map<String, String> = emptyMap(),

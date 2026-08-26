@@ -193,6 +193,36 @@ open class TrailsPlugin : JavaPlugin() {
 
     fun roadProfiles(): Collection<String> = roadManager.profiles()
 
+    fun showRoadProfiles(
+        sender: CommandSender,
+        requestedProfile: String?,
+    ): Boolean {
+        val profiles =
+            if (requestedProfile == null) {
+                roadSettings.profiles.values.toList()
+            } else {
+                listOfNotNull(roadSettings.profiles[requestedProfile.lowercase()])
+            }
+        if (profiles.isEmpty()) return false
+        if (requestedProfile == null) {
+            message(sender, "messages.roadProfilesHeader", mapOf("%count%" to profiles.size.toString()))
+        }
+        profiles.forEach { profile ->
+            val descriptionPath = "roadProfiles.${profile.name}"
+            message(
+                sender,
+                if (locale.exists(descriptionPath)) descriptionPath else "messages.roadProfileCustom",
+                mapOf(
+                    "%profile%" to profile.name,
+                    "%width%" to profile.width.toString(),
+                    "%material-count%" to profile.laneMaterials.size.toString(),
+                    "%pattern-count%" to profile.decorationPatterns.size.toString(),
+                ),
+            )
+        }
+        return true
+    }
+
     fun roadStart(
         player: Player,
         profile: String,

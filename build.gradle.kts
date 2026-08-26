@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.1.3"
+version = "2.2.0"
 
 repositories {
     mavenCentral()
@@ -169,7 +169,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         }
         val descriptor = zipTree(jar).matching { include("plugin.yml") }.singleFile.readText()
         check("main: ru.ruscrafting.trails.TrailsPlugin" in descriptor)
-        check("version: \"2.1.3\"" in descriptor)
+        check("version: \"2.2.0\"" in descriptor)
         val mainClass = zipTree(jar).matching { include("ru/ruscrafting/trails/TrailsPlugin.class") }.singleFile.readBytes()
         val classMajorVersion = ((mainClass[6].toInt() and 0xff) shl 8) or (mainClass[7].toInt() and 0xff)
         check(classMajorVersion == 65) { "TrailsPlugin.class must target Java 21 (major 65), found $classMajorVersion" }

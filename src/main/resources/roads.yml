@@ -1,20 +1,55 @@
 # Roads are opt-in: a permitted builder previews a route while walking and commits it explicitly.
-config-version: 1
+config-version: 2
 enabled: false
 
 # Empty means every world. Production should use an explicit test/build world allowlist.
 worlds: []
 
 limits:
-  max-planned-blocks: 256
-  preview-expiry-seconds: 300
-  surface-search-depth: 2
+  max-planned-blocks: 2048
+  preview-expiry-seconds: 600
+  surface-search-depth: 8
   # Fill a continuous road when movement events arrive several blocks apart. Larger jumps start a new segment.
-  max-segment-distance-blocks: 16
+  max-segment-distance-blocks: 48
   # Prevent a sudden vertical move from painting through cliffs or floors.
-  max-segment-height-difference-blocks: 4
+  max-segment-height-difference-blocks: 8
 
-# Roads only repaint these safe surface blocks. Containers, ores, structures, liquids, and air are never selected.
+movement:
+  # Road preview may follow builders flying close enough to a safe surface. Teleports still cancel the session.
+  capture-while-flying: true
+
+replacement:
+  # safe-solid accepts ordinary solid terrain. allowlist uses only replaceable-materials and road profile blocks.
+  mode: safe-solid
+  # These are additional to hard safety rules for block entities, ores, unbreakable and technical blocks.
+  protected-materials:
+    - COAL_BLOCK
+    - RAW_COPPER_BLOCK
+    - RAW_IRON_BLOCK
+    - RAW_GOLD_BLOCK
+    - COPPER_BLOCK
+    - IRON_BLOCK
+    - GOLD_BLOCK
+    - DIAMOND_BLOCK
+    - EMERALD_BLOCK
+    - LAPIS_BLOCK
+    - REDSTONE_BLOCK
+    - NETHERITE_BLOCK
+    - AMETHYST_BLOCK
+    - SPONGE
+    - WET_SPONGE
+    - TNT
+
+removed-blocks:
+  # Requires trails.roads.collect-drops and disables undo for that compensated commit to prevent duplication.
+  return-to-survival-inventory: false
+
+height-transitions:
+  enabled: true
+  # Percentages must total 100. Profiles may override this with stairs and/or slabs.
+  default-materials: {OAK_STAIRS: 75, COBBLESTONE_STAIRS: 25}
+
+# Used by replacement.mode: allowlist and retained for config-version 1 compatibility.
 replaceable-materials:
   - GRASS_BLOCK
   - DIRT
@@ -24,31 +59,187 @@ replaceable-materials:
   - MYCELIUM
   - DIRT_PATH
 
+# Periodic multi-block forms rotate with the road. Every element must stay outside the profile lanes.
+patterns:
+  lantern_posts:
+    every-blocks: 12
+    alternate-sides: true
+    placements:
+      - {forward: 0, lateral: 2, vertical: 1, materials: {COBBLESTONE_WALL: 70, MOSSY_COBBLESTONE_WALL: 30}}
+      - {forward: 0, lateral: 2, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: 2, vertical: 3, material: LANTERN}
+
+  soul_lantern_posts:
+    every-blocks: 16
+    alternate-sides: true
+    placements:
+      - {forward: 0, lateral: 2, vertical: 1, materials: {BLACKSTONE_WALL: 75, POLISHED_BLACKSTONE_WALL: 25}}
+      - {forward: 0, lateral: 2, vertical: 2, material: DARK_OAK_FENCE}
+      - {forward: 0, lateral: 2, vertical: 3, material: SOUL_LANTERN}
+
+  avenue_lantern_posts:
+    every-blocks: 12
+    alternate-sides: true
+    placements:
+      - {forward: 0, lateral: 3, vertical: 1, materials: {STONE_BRICK_WALL: 80, MOSSY_STONE_BRICK_WALL: 20}}
+      - {forward: 0, lateral: 3, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: 3, vertical: 3, material: LANTERN}
+
 profiles:
   footpath:
     lanes: [DIRT_PATH]
+    height-transition-materials: {OAK_SLAB: 80, SPRUCE_SLAB: 20}
 
   rustic:
     # Left edge, center, right edge. Width must be odd and no greater than 7.
-    lanes: [COARSE_DIRT, DIRT_PATH, COARSE_DIRT]
+    lanes:
+      - {COARSE_DIRT: 70, ROOTED_DIRT: 20, PODZOL: 10}
+      - {DIRT_PATH: 85, COARSE_DIRT: 15}
+      - {COARSE_DIRT: 70, ROOTED_DIRT: 20, PODZOL: 10}
+    height-transition-materials: {OAK_STAIRS: 75, SPRUCE_STAIRS: 25}
 
   country_lane:
-    lanes: [DIRT, COARSE_DIRT, DIRT_PATH, COARSE_DIRT, DIRT]
+    lanes:
+      - {DIRT: 70, COARSE_DIRT: 30}
+      - {COARSE_DIRT: 75, ROOTED_DIRT: 25}
+      - {DIRT_PATH: 85, COARSE_DIRT: 15}
+      - {COARSE_DIRT: 75, ROOTED_DIRT: 25}
+      - {DIRT: 70, COARSE_DIRT: 30}
+    height-transition-materials: {COBBLESTONE_STAIRS: 80, MOSSY_COBBLESTONE_STAIRS: 20}
 
   gravel:
-    lanes: [COARSE_DIRT, GRAVEL, COARSE_DIRT]
+    lanes:
+      - {COARSE_DIRT: 75, GRAVEL: 25}
+      - {GRAVEL: 85, ANDESITE: 15}
+      - {COARSE_DIRT: 75, GRAVEL: 25}
+    height-transition-materials: {COBBLESTONE_STAIRS: 75, POLISHED_ANDESITE_STAIRS: 25}
 
   cobblestone:
-    lanes: [COBBLESTONE, STONE_BRICKS, COBBLESTONE]
+    lanes:
+      - {COBBLESTONE: 75, MOSSY_COBBLESTONE: 25}
+      - {STONE_BRICKS: 80, CRACKED_STONE_BRICKS: 20}
+      - {COBBLESTONE: 75, MOSSY_COBBLESTONE: 25}
+    height-transition-materials: {STONE_BRICK_STAIRS: 80, MOSSY_STONE_BRICK_STAIRS: 20}
 
   mossy_stone:
-    lanes: [MOSS_BLOCK, MOSSY_COBBLESTONE, STONE_BRICKS, MOSSY_COBBLESTONE, MOSS_BLOCK]
+    lanes:
+      - {MOSS_BLOCK: 75, MOSSY_COBBLESTONE: 25}
+      - {MOSSY_COBBLESTONE: 70, COBBLESTONE: 30}
+      - {STONE_BRICKS: 60, MOSSY_STONE_BRICKS: 40}
+      - {MOSSY_COBBLESTONE: 70, COBBLESTONE: 30}
+      - {MOSS_BLOCK: 75, MOSSY_COBBLESTONE: 25}
+    height-transition-materials: {MOSSY_COBBLESTONE_STAIRS: 70, COBBLESTONE_STAIRS: 30}
 
   boardwalk:
-    lanes: [OAK_PLANKS, SPRUCE_PLANKS, OAK_PLANKS]
+    lanes:
+      - {OAK_PLANKS: 80, SPRUCE_PLANKS: 20}
+      - {SPRUCE_PLANKS: 70, OAK_PLANKS: 30}
+      - {OAK_PLANKS: 80, SPRUCE_PLANKS: 20}
+    height-transition-materials: {OAK_STAIRS: 70, SPRUCE_STAIRS: 30}
 
   sandstone:
-    lanes: [SANDSTONE, SMOOTH_SANDSTONE, SANDSTONE]
+    lanes:
+      - {SANDSTONE: 80, CUT_SANDSTONE: 20}
+      - {SMOOTH_SANDSTONE: 80, CUT_SANDSTONE: 20}
+      - {SANDSTONE: 80, CUT_SANDSTONE: 20}
+    height-transition-materials: {SANDSTONE_STAIRS: 80, SMOOTH_SANDSTONE_STAIRS: 20}
 
   nether:
-    lanes: [BLACKSTONE, POLISHED_BLACKSTONE_BRICKS, BLACKSTONE]
+    lanes:
+      - {BLACKSTONE: 80, GILDED_BLACKSTONE: 20}
+      - {POLISHED_BLACKSTONE_BRICKS: 80, CRACKED_POLISHED_BLACKSTONE_BRICKS: 20}
+      - {BLACKSTONE: 80, GILDED_BLACKSTONE: 20}
+    height-transition-materials: {BLACKSTONE_STAIRS: 70, POLISHED_BLACKSTONE_BRICK_STAIRS: 30}
+
+  lantern_lane:
+    lanes:
+      - {COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}
+      - {STONE_BRICKS: 75, CRACKED_STONE_BRICKS: 25}
+      - {COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}
+    height-transition-materials: {STONE_BRICK_STAIRS: 70, MOSSY_STONE_BRICK_STAIRS: 30}
+    patterns: [lantern_posts]
+
+  forest_walk:
+    lanes:
+      - {MOSS_BLOCK: 55, PODZOL: 30, MOSSY_COBBLESTONE: 15}
+      - {DIRT_PATH: 70, ROOTED_DIRT: 20, COARSE_DIRT: 10}
+      - {MOSS_BLOCK: 55, PODZOL: 30, MOSSY_COBBLESTONE: 15}
+    height-transition-materials: {MOSSY_COBBLESTONE_STAIRS: 60, OAK_STAIRS: 40}
+
+  cherry_avenue:
+    lanes:
+      - {CHERRY_PLANKS: 75, CALCITE: 25}
+      - {STRIPPED_CHERRY_WOOD: 55, CHERRY_PLANKS: 45}
+      - {CALCITE: 55, CHERRY_PLANKS: 45}
+      - {STRIPPED_CHERRY_WOOD: 55, CHERRY_PLANKS: 45}
+      - {CHERRY_PLANKS: 75, CALCITE: 25}
+    height-transition-materials: {CHERRY_STAIRS: 85, QUARTZ_STAIRS: 15}
+
+  alpine_pass:
+    lanes:
+      - {STONE: 60, ANDESITE: 30, GRAVEL: 10}
+      - {ANDESITE: 55, COBBLESTONE: 30, GRAVEL: 15}
+      - {STONE: 60, ANDESITE: 30, GRAVEL: 10}
+    height-transition-materials: {COBBLESTONE_STAIRS: 70, STONE_BRICK_STAIRS: 30}
+
+  royal_road:
+    lanes:
+      - {POLISHED_ANDESITE: 75, STONE_BRICKS: 25}
+      - {STONE_BRICKS: 80, MOSSY_STONE_BRICKS: 20}
+      - {CHISELED_STONE_BRICKS: 70, POLISHED_DIORITE: 30}
+      - {STONE_BRICKS: 80, MOSSY_STONE_BRICKS: 20}
+      - {POLISHED_ANDESITE: 75, STONE_BRICKS: 25}
+    height-transition-materials: {STONE_BRICK_STAIRS: 80, POLISHED_ANDESITE_STAIRS: 20}
+    patterns: [avenue_lantern_posts]
+
+  ancient_tuff:
+    lanes:
+      - {TUFF: 65, POLISHED_TUFF: 35}
+      - {TUFF_BRICKS: 70, CHISELED_TUFF_BRICKS: 30}
+      - {POLISHED_TUFF: 60, TUFF_BRICKS: 40}
+      - {TUFF_BRICKS: 70, CHISELED_TUFF_BRICKS: 30}
+      - {TUFF: 65, POLISHED_TUFF: 35}
+    height-transition-materials: {TUFF_BRICK_STAIRS: 65, POLISHED_TUFF_STAIRS: 35}
+
+  frozen_path:
+    lanes:
+      - {SNOW_BLOCK: 60, PACKED_ICE: 35, BLUE_ICE: 5}
+      - {PACKED_ICE: 65, SNOW_BLOCK: 25, BLUE_ICE: 10}
+      - {SNOW_BLOCK: 60, PACKED_ICE: 35, BLUE_ICE: 5}
+    height-transition-materials: {SMOOTH_QUARTZ_STAIRS: 75, QUARTZ_STAIRS: 25}
+
+  red_desert:
+    lanes:
+      - {RED_SAND: 55, TERRACOTTA: 30, RED_SANDSTONE: 15}
+      - {RED_SANDSTONE: 65, CUT_RED_SANDSTONE: 35}
+      - {RED_SAND: 55, TERRACOTTA: 30, RED_SANDSTONE: 15}
+    height-transition-materials: {RED_SANDSTONE_STAIRS: 75, SMOOTH_RED_SANDSTONE_STAIRS: 25}
+
+  volcanic:
+    lanes:
+      - {BASALT: 55, BLACKSTONE: 35, MAGMA_BLOCK: 10}
+      - {POLISHED_BASALT: 55, POLISHED_BLACKSTONE_BRICKS: 40, MAGMA_BLOCK: 5}
+      - {BASALT: 55, BLACKSTONE: 35, MAGMA_BLOCK: 10}
+    height-transition-materials: {BLACKSTONE_STAIRS: 70, POLISHED_BLACKSTONE_BRICK_STAIRS: 30}
+
+  prismarine_causeway:
+    lanes:
+      - {PRISMARINE: 70, DARK_PRISMARINE: 25, SEA_LANTERN: 5}
+      - {PRISMARINE_BRICKS: 70, DARK_PRISMARINE: 25, SEA_LANTERN: 5}
+      - {PRISMARINE: 70, DARK_PRISMARINE: 25, SEA_LANTERN: 5}
+    height-transition-materials: {PRISMARINE_STAIRS: 60, PRISMARINE_BRICK_STAIRS: 40}
+
+  ender_way:
+    lanes:
+      - {END_STONE: 65, END_STONE_BRICKS: 35}
+      - {END_STONE_BRICKS: 70, PURPUR_BLOCK: 30}
+      - {END_STONE: 65, END_STONE_BRICKS: 35}
+    height-transition-materials: {END_STONE_BRICK_STAIRS: 70, PURPUR_STAIRS: 30}
+
+  soul_lane:
+    lanes:
+      - {SOUL_SOIL: 55, SOUL_SAND: 25, BLACKSTONE: 20}
+      - {BLACKSTONE: 60, POLISHED_BLACKSTONE_BRICKS: 40}
+      - {SOUL_SOIL: 55, SOUL_SAND: 25, BLACKSTONE: 20}
+    height-transition-materials: {BLACKSTONE_STAIRS: 70, POLISHED_BLACKSTONE_BRICK_STAIRS: 30}
+    patterns: [soul_lantern_posts]

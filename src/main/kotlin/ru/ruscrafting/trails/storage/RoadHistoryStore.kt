@@ -132,7 +132,7 @@ class RoadHistoryStore(
     private companion object {
         const val CONFIG_VERSION = 1
         const val MAX_STORED_PLAYERS = 10
-        const val MAX_BLOCKS_PER_COMMIT = 1024
+        const val MAX_BLOCKS_PER_COMMIT = 4096
         const val MAX_BLOCK_DATA_LENGTH = 1024
         const val MAX_IDENTITY_LENGTH = 256
     }

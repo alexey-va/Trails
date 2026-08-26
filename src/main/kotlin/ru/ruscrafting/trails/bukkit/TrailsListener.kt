@@ -21,13 +21,13 @@ class TrailsListener(
     fun onMove(event: PlayerMoveEvent) {
         val to = event.to
         val from = event.from
-        if (event.player.isFlying ||
-            from.world !== to.world ||
+        if (from.world !== to.world ||
             (from.blockX == to.blockX && from.blockY == to.blockY && from.blockZ == to.blockZ)
         ) {
             return
         }
         val capturingRoad = plugin.captureRoadMovement(event.player, to)
+        if (event.player.isFlying) return
         plugin.handleMovement(event.player, from.clone().subtract(0.0, 0.1, 0.0).block, createTrail = !capturingRoad)
     }
 

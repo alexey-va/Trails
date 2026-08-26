@@ -41,4 +41,14 @@ class RoadGeometryTest :
             RoadGeometry.segment(RoadPoint(0, 0), RoadPoint(0, 1), 3).first() shouldBe
                 RoadCell(1, 0, -1)
         }
+
+        "an east-dominant diagonal keeps its width perpendicular to travel" {
+            val rows = RoadGeometry.rows(RoadPoint(0, 0), RoadPoint(4, 1), 3)
+
+            rows.forEach { row ->
+                row.cells.map(RoadCell::x).toSet() shouldBe setOf(row.center.x)
+                row.cells.map(RoadCell::z).toSet() shouldBe
+                    setOf(row.center.z - 1, row.center.z, row.center.z + 1)
+            }
+        }
     })

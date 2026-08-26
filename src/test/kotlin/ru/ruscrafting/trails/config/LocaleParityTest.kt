@@ -17,8 +17,12 @@ class LocaleParityTest :
 
                 russian.keys("messages") shouldContainExactlyInAnyOrder english.keys("messages")
                 chinese.keys("messages") shouldContainExactlyInAnyOrder english.keys("messages")
+                russian.keys("roadProfiles") shouldContainExactlyInAnyOrder english.keys("roadProfiles")
+                chinese.keys("roadProfiles") shouldContainExactlyInAnyOrder english.keys("roadProfiles")
                 russian.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
                 chinese.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
+                val roads = RoadSettingsLoader.load(YamlConfig(folder, "roads.yml"))
+                english.keys("roadProfiles") shouldContainExactlyInAnyOrder roads.profiles.keys
 
                 val locale = LocaleService.load(folder, "ru-RU", "trails")
                 locale.formatName shouldBe "minimessage"
