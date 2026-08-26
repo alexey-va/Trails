@@ -84,7 +84,9 @@ instead of being mistaken for a full-block rise; top/double slabs, waterlogged b
 block or establish the road grade normally.
 
 Each lane and height transition accepts either one material or a weighted map whose integer percentages total 100,
-for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. The selection is stable for the lifetime of one preview.
+for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. Surface materials are selected per road cell, while one
+transition material is selected for the complete cross-road row so contrasting stairs cannot appear as isolated
+teeth. The selection is stable for the lifetime of one preview.
 One-block height changes can use bottom slabs or direction-aware bottom stairs; stairs face along the road toward the
 higher end. A height transition is emitted only when the centerline changes height and a lane follows the same step,
 which prevents isolated side slopes from producing sideways stair tangles. Periodic forms are reusable rotated

@@ -88,7 +88,8 @@ removed-blocks:
 
 height-transitions:
   enabled: true
-  # Percentages must total 100. Profiles may override this with stairs and/or slabs.
+  # Percentages must total 100. One material is selected per complete transition row.
+  # Profiles may override this with stairs and/or slabs.
   default-materials: {OAK_STAIRS: 75, COBBLESTONE_STAIRS: 25}
 
 # Used by replacement.mode: allowlist and retained for config-version 1 compatibility.

@@ -492,14 +492,15 @@ class RoadManager internal constructor(
             val toCenter = toRow.cells[0]?.surface ?: return@forEach
             val centerHeightDifference = toCenter.y - fromCenter.y
             if (abs(centerHeightDifference) != 1) return@forEach
+            val ascending = centerHeightDifference > 0
+            val highCenter = if (ascending) toCenter else fromCenter
+            val transitionMaterial =
+                transitionPalette.select(paletteSample(session, highCenter, 0, PlanRole.HEIGHT_TRANSITION))
             fromRow.cells.keys.intersect(toRow.cells.keys).forEach { lane ->
                 val fromBlock = fromRow.cells.getValue(lane).surface
                 val toBlock = toRow.cells.getValue(lane).surface
                 if (toBlock.y - fromBlock.y != centerHeightDifference) return@forEach
-                val ascending = centerHeightDifference > 0
                 val highBlock = if (ascending) toBlock else fromBlock
-                val transitionMaterial =
-                    transitionPalette.select(paletteSample(session, highBlock, lane, PlanRole.HEIGHT_TRANSITION))
                 val transition =
                     RoadHeightTransitionFactory.create(
                         transitionMaterial,

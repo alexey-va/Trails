@@ -5,12 +5,16 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.block.BlockFace
 import org.bukkit.block.data.type.Stairs
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.ruscrafting.trails.bukkit.RoadManager
+import ru.ruscrafting.trails.config.RoadSettingsLoader
+import ru.ruscrafting.trails.config.YamlConfig
 import java.nio.file.Files
 
 class RoadTerrainIntegrationTest :
@@ -69,6 +73,51 @@ class RoadTerrainIntegrationTest :
 
             (-1..1).forEach { z ->
                 (world.getBlockAt(1, 65, z).blockData is Stairs) shouldBe true
+            }
+        }
+
+        "a wide weighted height transition uses one cohesive material across the stair row" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("CohesiveStairRoadBuilder").also { it.isOp = true }
+            for (z in -2..2) {
+                world.getBlockAt(0, 64, z).type = Material.STONE
+                world.getBlockAt(1, 64, z).type = Material.STONE
+                world.getBlockAt(1, 65, z).type = Material.STONE
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            enableRoads(plugin) {
+                it.replace(
+                    "height-transition-materials: {CHERRY_STAIRS: 85, QUARTZ_STAIRS: 15}",
+                    "height-transition-materials: {CHERRY_STAIRS: 50, QUARTZ_STAIRS: 50}",
+                )
+            }
+            val settings = RoadSettingsLoader.load(YamlConfig(plugin.dataFolder.toPath(), "roads.yml"))
+            val startedAt =
+                generateSequence(0L, Long::inc).first { candidate ->
+                    val seed = world.uid.mostSignificantBits xor world.uid.leastSignificantBits xor candidate
+                    (-2..2)
+                        .map { lane -> transitionBucket(seed, x = 1, y = 65, z = lane, lane = lane) < 50 }
+                        .toSet()
+                        .size > 1
+                }
+            val manager = RoadManager(plugin, settings, clockMillis = { startedAt })
+
+            try {
+                manager.start(admin, "cherry_avenue").message shouldBe "messages.roadStarted"
+                manager.capture(admin, Location(world, 1.5, 66.0, 0.5)) shouldBe true
+                manager.commit(admin).message shouldBe "messages.roadCommitted"
+
+                val transitionMaterials =
+                    (-2..2).map { z ->
+                        val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
+                        stairs.facing shouldBe BlockFace.EAST
+                        stairs.material
+                    }.toSet()
+                transitionMaterials.size shouldBe 1
+            } finally {
+                manager.close()
             }
         }
 
@@ -202,4 +251,26 @@ private fun enableRoads(
         customize(enabled),
     )
     plugin.reloadTrails().getOrThrow()
+}
+
+private fun transitionBucket(
+    seed: Long,
+    x: Int,
+    y: Int,
+    z: Int,
+    lane: Int,
+): Int {
+    var value = seed
+    value = mixRoadPalette(value xor x.toLong())
+    value = mixRoadPalette(value xor y.toLong())
+    value = mixRoadPalette(value xor z.toLong())
+    value = mixRoadPalette(value xor lane.toLong())
+    return Math.floorMod(mixRoadPalette(value xor 1L), 100L).toInt()
+}
+
+private fun mixRoadPalette(input: Long): Long {
+    var value = input
+    value = (value xor (value ushr 33)) * -49064778989728563L
+    value = (value xor (value ushr 33)) * -4265267296055464877L
+    return value xor (value ushr 33)
 }
