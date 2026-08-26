@@ -6,15 +6,17 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.entity.Item
 import org.bukkit.inventory.ItemStack
-import org.mockbukkit.mockbukkit.MockBukkit
+import ru.arc.paper.testing.MockBukkitTestRuntime
 
 class RoadBlockCompensationTest :
     FreeSpec({
-        beforeTest { MockBukkit.mock() }
-        afterTest { MockBukkit.unmock() }
+        lateinit var runtime: MockBukkitTestRuntime
+
+        beforeTest { runtime = MockBukkitTestRuntime.open() }
+        afterTest { runtime.close() }
 
         "inventory overflow is dropped at the builder with an ownership lock" {
-            val server = checkNotNull(MockBukkit.getMock())
+            val server = runtime.server
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("FullInventoryBuilder")
             player.teleport(Location(world, 0.5, 65.0, 0.5))

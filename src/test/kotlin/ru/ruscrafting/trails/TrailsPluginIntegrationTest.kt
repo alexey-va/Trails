@@ -26,8 +26,8 @@ import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
-import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.trails.bukkit.RoadNotice
 import ru.ruscrafting.trails.bukkit.TrailToolKind
 import ru.ruscrafting.trails.domain.TrailIdentity
@@ -39,14 +39,16 @@ class TrailsPluginIntegrationTest :
     FreeSpec({
         lateinit var server: ServerMock
         lateinit var plugin: TrailsPlugin
+        lateinit var runtime: MockBukkitTestRuntime
 
         beforeTest {
-            server = MockBukkit.mock()
-            plugin = MockBukkit.load(TrailsPlugin::class.java)
+            runtime = MockBukkitTestRuntime.open()
+            server = runtime.server
+            plugin = runtime.loadPlugin(TrailsPlugin::class.java)
         }
 
         afterTest {
-            MockBukkit.unmock()
+            runtime.close()
         }
 
         "loads, toggles preferences through the command, and disables cleanly" {

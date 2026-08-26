@@ -99,9 +99,9 @@ are centralized in `gradle/libs.versions.toml`, resolved versions are committed 
 repositories are restricted to the groups they are expected to serve. CI runs the complete build on Java 21 and Java
 25, while the published classes target Java 21 bytecode.
 
-`arc-core` was evaluated for configuration support and is small enough at runtime, but it is intentionally not a
-build dependency: Trails is public while `arc-core` is private, so depending on it would make public CI and external
-builds non-reproducible. Trails keeps the required atomic YAML behavior in its own narrow adapter instead.
+Released `arc-core` test utilities are resolved anonymously from the public RusCrafting Reposilite repository.
+Trails uses `arc-core-paper-testing` to own MockBukkit's process-global lifecycle consistently while keeping the
+deployable plugin independent of `arc-core`. Production persistence remains in Trails' narrow adapters.
 
 ## Architecture
 

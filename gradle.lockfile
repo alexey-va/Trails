@@ -177,4 +177,5 @@ org.ow2.asm:asm:9.9=jacocoAnt
 org.slf4j:jcl-over-slf4j:1.7.36=testRuntimeClasspath
 org.slf4j:slf4j-api:2.0.16=compileClasspath,testCompileClasspath,testRuntimeClasspath
 org.yaml:snakeyaml:2.2=compileClasspath,testCompileClasspath,testRuntimeClasspath
+ru.ruscrafting.arc:arc-core-paper-testing:1.0.1=testCompileClasspath,testRuntimeClasspath
 empty=annotationProcessor,implementationDependenciesMetadata,kotlinCompilerPluginClasspath,kotlinNativeCompilerPluginClasspath,kotlinScriptDefExtensions,shadow,testAnnotationProcessor,testImplementationDependenciesMetadata,testKotlinScriptDefExtensions

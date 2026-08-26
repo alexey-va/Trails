@@ -13,6 +13,10 @@ version = "2.2.0"
 
 repositories {
     mavenCentral()
+    maven("https://repo.rus-crafting.ru/grocermc/") {
+        name = "RusCrafting"
+        content { includeGroup("ru.ruscrafting.arc") }
+    }
     maven("https://repo.papermc.io/repository/maven-public/") {
         name = "PaperMC"
         content {
@@ -45,7 +49,7 @@ dependencies {
     testImplementation(libs.kotest.runner.junit5)
     testImplementation(libs.kotest.assertions.core)
     testImplementation(libs.mockk)
-    testImplementation(libs.mockbukkit)
+    testImplementation(libs.arc.core.paper.testing)
     testImplementation(libs.placeholder.api)
     testRuntimeOnly(libs.coreprotect)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -146,6 +150,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         check(
             entries.none {
                 it.startsWith("org/mockbukkit/") ||
+                    it.startsWith("ru/arc/") ||
                     it.startsWith("io/kotest/") ||
                     it.startsWith("io/mockk/") ||
                     it.startsWith("org/junit/")

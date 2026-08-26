@@ -7,13 +7,15 @@ import org.bukkit.block.BlockFace
 import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.type.Slab
 import org.bukkit.block.data.type.Stairs
-import org.mockbukkit.mockbukkit.MockBukkit
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.trails.domain.RoadPoint
 
 class RoadHeightTransitionFactoryTest :
     FreeSpec({
-        beforeTest { MockBukkit.mock() }
-        afterTest { MockBukkit.unmock() }
+        lateinit var runtime: MockBukkitTestRuntime
+
+        beforeTest { runtime = MockBukkitTestRuntime.open() }
+        afterTest { runtime.close() }
 
         "ascending stairs face the higher end of an eastbound road" {
             val data =

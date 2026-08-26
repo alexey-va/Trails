@@ -5,12 +5,14 @@ import io.kotest.matchers.shouldBe
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.util.BoundingBox
-import org.mockbukkit.mockbukkit.MockBukkit
+import ru.arc.paper.testing.MockBukkitTestRuntime
 
 class RoadPreviewSelectorTest :
     FreeSpec({
-        beforeSpec { MockBukkit.mock() }
-        afterSpec { MockBukkit.unmock() }
+        lateinit var runtime: MockBukkitTestRuntime
+
+        beforeTest { runtime = MockBukkitTestRuntime.open() }
+        afterTest { runtime.close() }
 
         "a full collision cube is safe to show as a fake block" {
             RoadPreviewSelector.isFullCube(listOf(BoundingBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))) shouldBe true

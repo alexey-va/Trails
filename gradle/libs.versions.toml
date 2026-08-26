@@ -8,7 +8,7 @@ coreprotect = "23.2"
 placeholder-api = "2.12.3"
 kotest = "6.2.4"
 mockk = "1.14.11"
-mockbukkit = "4.110.0"
+arc-core = "1.0.1"
 
 [libraries]
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
@@ -19,7 +19,7 @@ placeholder-api = { module = "me.clip:placeholderapi", version.ref = "placeholde
 kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
-mockbukkit = { module = "org.mockbukkit.mockbukkit:mockbukkit-v1.21", version.ref = "mockbukkit" }
+arc-core-paper-testing = { module = "ru.ruscrafting.arc:arc-core-paper-testing", version.ref = "arc-core" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 
 [plugins]
