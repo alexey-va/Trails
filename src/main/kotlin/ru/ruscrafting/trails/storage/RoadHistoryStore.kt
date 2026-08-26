@@ -15,7 +15,7 @@ data class RoadBlockRecord(
     val beforeData: String,
     val afterData: String,
     val previousState: TrailBlockState?,
-    val afterState: TrailBlockState,
+    val afterState: TrailBlockState?,
 )
 
 data class RoadCommitRecord(
@@ -32,7 +32,8 @@ class RoadHistoryStore(
     fun load(): LinkedHashMap<UUID, RoadCommitRecord> {
         if (!Files.exists(path)) return linkedMapOf()
         val yaml = YamlConfiguration.loadConfiguration(path.toFile())
-        require(yaml.getInt("config-version") == CONFIG_VERSION) { "Unsupported road-history.yml config-version" }
+        val configVersion = yaml.getInt("config-version")
+        require(configVersion in 1..CONFIG_VERSION) { "Unsupported road-history.yml config-version" }
         val historyKeys = yaml.getConfigurationSection("history")?.getKeys(false).orEmpty()
         require(historyKeys.size <= MAX_STORED_PLAYERS * 2) { "road-history.yml contains too many player entries" }
         val loaded =
@@ -68,11 +69,16 @@ class RoadHistoryStore(
                         if (rawAfterIdentity != null && rawAfterIdentity.length > MAX_IDENTITY_LENGTH) return@mapNotNull null
                         val afterIdentity = TrailIdentity.parse(rawAfterIdentity)
                         if (rawAfterIdentity != null && afterIdentity == null) return@mapNotNull null
+                        val afterPresent = configVersion == 1 || raw["after-present"] == true
                         val afterState =
-                            TrailBlockState(
-                                afterIdentity,
-                                ((raw["after-walks"] as? Number)?.toInt() ?: 0).coerceAtLeast(0),
-                            )
+                            if (afterPresent) {
+                                TrailBlockState(
+                                    afterIdentity,
+                                    ((raw["after-walks"] as? Number)?.toInt() ?: 0).coerceAtLeast(0),
+                                )
+                            } else {
+                                null
+                            }
                         RoadBlockRecord(x, y, z, before, after, previous, afterState)
                     }
                 if (blocks.isEmpty() || blocks.size != rawBlocks.size) null else uuid to RoadCommitRecord(world, committedAt, blocks)
@@ -107,10 +113,11 @@ class RoadHistoryStore(
                         "after" to block.afterData,
                         "previous-present" to (block.previousState != null),
                         "previous-walks" to (block.previousState?.walks ?: 0),
-                        "after-walks" to block.afterState.walks,
+                        "after-present" to (block.afterState != null),
+                        "after-walks" to (block.afterState?.walks ?: 0),
                     ).apply {
                         block.previousState?.identity?.let { put("previous-identity", it.serialize()) }
-                        block.afterState.identity?.let { put("after-identity", it.serialize()) }
+                        block.afterState?.identity?.let { put("after-identity", it.serialize()) }
                     }
                 },
             )
@@ -130,7 +137,7 @@ class RoadHistoryStore(
     }
 
     private companion object {
-        const val CONFIG_VERSION = 1
+        const val CONFIG_VERSION = 2
         const val MAX_STORED_PLAYERS = 10
         const val MAX_BLOCKS_PER_COMMIT = 4096
         const val MAX_BLOCK_DATA_LENGTH = 1024

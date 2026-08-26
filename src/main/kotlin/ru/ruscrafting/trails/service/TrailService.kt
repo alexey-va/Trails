@@ -138,6 +138,10 @@ class TrailService(
     ): TrailBlockState? {
         val previous = store.read(block)
         changeBlockData(actor, block, afterData)
+        if (afterData.material.isAir) {
+            store.clear(block)
+            return previous
+        }
         // Road palettes are independent from natural trail stages. Known materials retain
         // their trail identity; decorative road-only materials are still tracked for undo.
         val identity = catalog.resolve(block.type.name, null)?.identity

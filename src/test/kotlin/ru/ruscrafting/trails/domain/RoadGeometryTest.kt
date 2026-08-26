@@ -88,4 +88,11 @@ class RoadGeometryTest :
 
             RoadGeometry.row(landing, RoadPoint(-30_000_000, -30_000_000), landing, 3).cells.size shouldBe 3
         }
+
+        "grade smoothing removes only isolated one-block bumps and depressions" {
+            RoadGeometry.smoothIsolatedGrades(listOf(64, 65, 64, 63, 64)) shouldBe
+                listOf(64, 64, 64, 64, 64)
+            RoadGeometry.smoothIsolatedGrades(listOf(64, 65, 65, 66)) shouldBe
+                listOf(64, 65, 65, 66)
+        }
     })

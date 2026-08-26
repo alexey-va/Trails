@@ -21,6 +21,8 @@ data class RoadSettings(
     val captureWhileFlying: Boolean,
     val smoothingEnabled: Boolean,
     val smoothingToleranceBlocks: Double,
+    val clearanceHeightBlocks: Int,
+    val clearableMaterials: Set<Material>,
     val replacementMode: RoadReplacementMode,
     val replaceableMaterials: Set<Material>,
     val protectedMaterials: Set<Material>,
@@ -61,6 +63,8 @@ object RoadMaterialSafety {
             material.hardness >= 0.0F &&
             !isOre(material) &&
             !isSpecial(material)
+
+    fun isClearableRoadObstruction(material: Material): Boolean = material.name in CLEARABLE_ROAD_OBSTRUCTIONS
 
     private fun isOre(material: Material): Boolean = material.name.endsWith("_ORE") || material == Material.ANCIENT_DEBRIS
 
@@ -124,6 +128,38 @@ object RoadMaterialSafety {
             Material.TRIAL_SPAWNER,
             Material.VAULT,
         )
+
+    private val CLEARABLE_ROAD_OBSTRUCTIONS =
+        setOf(
+            "SHORT_GRASS",
+            "TALL_GRASS",
+            "FERN",
+            "LARGE_FERN",
+            "DEAD_BUSH",
+            "DANDELION",
+            "POPPY",
+            "BLUE_ORCHID",
+            "ALLIUM",
+            "AZURE_BLUET",
+            "RED_TULIP",
+            "ORANGE_TULIP",
+            "WHITE_TULIP",
+            "PINK_TULIP",
+            "OXEYE_DAISY",
+            "CORNFLOWER",
+            "LILY_OF_THE_VALLEY",
+            "WITHER_ROSE",
+            "TORCHFLOWER",
+            "PINK_PETALS",
+            "WILDFLOWERS",
+            "PITCHER_PLANT",
+            "BROWN_MUSHROOM",
+            "RED_MUSHROOM",
+            "CRIMSON_ROOTS",
+            "WARPED_ROOTS",
+            "NETHER_SPROUTS",
+            "SNOW",
+        )
 }
 
 object RoadSettingsLoader {
@@ -172,6 +208,18 @@ object RoadSettingsLoader {
         if (!smoothingTolerance.isFinite() || smoothingTolerance !in 0.0..4.0) {
             problems += "movement.smoothing.tolerance-blocks must be between 0.0 and 4.0"
         }
+
+        val clearanceHeight = if (legacy) 0 else integer(config, "clearance.height-blocks", 2, problems)
+        if (clearanceHeight !in 0..4) problems += "clearance.height-blocks must be between 0 and 4"
+        val rawClearable = if (legacy) emptyList() else config.stringList("clearance.materials")
+        if (rawClearable.size > 128) problems += "clearance.materials must contain at most 128 entries"
+        val parsedClearable = materials(rawClearable.take(128), "clearance.materials", problems)
+        val unsafeClearable = parsedClearable.filterNot(RoadMaterialSafety::isClearableRoadObstruction)
+        if (unsafeClearable.isNotEmpty()) {
+            problems +=
+                "clearance.materials contains unsafe road obstructions: ${unsafeClearable.joinToString { it.name }}"
+        }
+        val clearable = parsedClearable.filterTo(linkedSetOf(), RoadMaterialSafety::isClearableRoadObstruction)
 
         val replacementMode = replacementMode(config, legacy, problems)
         val rawReplaceable = config.stringList("replaceable-materials")
@@ -225,6 +273,8 @@ object RoadSettingsLoader {
             captureWhileFlying = captureWhileFlying,
             smoothingEnabled = smoothingEnabled,
             smoothingToleranceBlocks = smoothingTolerance,
+            clearanceHeightBlocks = clearanceHeight,
+            clearableMaterials = clearable,
             replacementMode = replacementMode,
             replaceableMaterials = replaceable,
             protectedMaterials = protected,

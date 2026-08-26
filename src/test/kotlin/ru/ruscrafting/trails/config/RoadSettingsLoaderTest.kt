@@ -55,6 +55,8 @@ class RoadSettingsLoaderTest :
                 settings.surfaceSearchDepth shouldBe 2
                 settings.maxSegmentDistanceBlocks shouldBe 16
                 settings.maxSegmentHeightDifferenceBlocks shouldBe 4
+                settings.clearanceHeightBlocks shouldBe 0
+                settings.clearableMaterials shouldBe emptySet()
                 settings.profiles.keys shouldBe setOf("legacy")
             } finally {
                 folder.toFile().deleteRecursively()
@@ -122,6 +124,8 @@ class RoadSettingsLoaderTest :
                 settings.captureWhileFlying shouldBe true
                 settings.smoothingEnabled shouldBe true
                 settings.smoothingToleranceBlocks shouldBe 1.0
+                settings.clearanceHeightBlocks shouldBe 2
+                settings.clearableMaterials shouldContain Material.SHORT_GRASS
                 settings.replacementMode shouldBe RoadReplacementMode.SAFE_SOLID
                 settings.protectedMaterials shouldContain Material.DIAMOND_BLOCK
                 settings.returnReplacedBlocksInSurvival shouldBe true
@@ -140,6 +144,8 @@ class RoadSettingsLoaderTest :
                         .replace("max-planned-blocks: 2048", "max-planned-blocks: 4097")
                         .replace("max-cross-slope-blocks: 1", "max-cross-slope-blocks: 5")
                         .replace("tolerance-blocks: 1.0", "tolerance-blocks: 9.0")
+                        .replace("height-blocks: 2", "height-blocks: 5")
+                        .replace("materials: [SHORT_GRASS, POPPY]", "materials: [SHORT_GRASS, STONE]")
                         .replace("mode: safe-solid", "mode: everything")
                         .replace("default-material: OAK_STAIRS", "default-material: BEDROCK")
                         .replace("lanes: [COARSE_DIRT, DIRT_PATH, COARSE_DIRT]", "lanes: [DIRT, CHEST, DIRT]")
@@ -151,6 +157,8 @@ class RoadSettingsLoaderTest :
                 error.problems shouldContain "limits.max-planned-blocks must be between 1 and 4096"
                 error.problems shouldContain "limits.max-cross-slope-blocks must be between 0 and 4"
                 error.problems shouldContain "movement.smoothing.tolerance-blocks must be between 0.0 and 4.0"
+                error.problems shouldContain "clearance.height-blocks must be between 0 and 4"
+                error.problems shouldContain "clearance.materials contains unsafe road obstructions: STONE"
                 error.problems shouldContain "replacement.mode must be 'allowlist' or 'safe-solid'"
                 error.problems shouldContain "height-transitions.default-materials uses unsafe material 'BEDROCK'"
                 error.problems shouldContain "profiles.rustic.lanes[1] uses unsafe material 'CHEST'"
@@ -238,6 +246,9 @@ class RoadSettingsLoaderTest :
               smoothing:
                 enabled: true
                 tolerance-blocks: 1.0
+            clearance:
+              height-blocks: 2
+              materials: [SHORT_GRASS, POPPY]
             replacement:
               mode: safe-solid
               protected-materials: [DIAMOND_BLOCK]

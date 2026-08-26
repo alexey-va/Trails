@@ -22,6 +22,26 @@ internal class RoadSurfacePolicy(
         }
     }
 
+    fun canPlaceSurface(block: Block): Boolean =
+        canReplace(block) ||
+            ((block.type.isAir || canClearAbove(block)) && canReplace(block.getRelative(0, -1, 0)))
+
+    fun canExcavate(block: Block): Boolean = canReplace(block)
+
+    fun canClearAbove(block: Block): Boolean =
+        block.type in settings.clearableMaterials &&
+            block.type !in settings.protectedMaterials &&
+            block.state !is TileState &&
+            block.type != Material.WATER &&
+            block.type != Material.LAVA
+
+    fun canRemainAboveRoad(block: Block): Boolean =
+        !block.type.isSolid &&
+            block.type != Material.WATER &&
+            block.type != Material.LAVA &&
+            block.state !is TileState &&
+            !canClearAbove(block)
+
     fun hasWalkableTop(block: Block): Boolean {
         if (!block.type.isSolid || block.type.isAir) return false
         val above = block.getRelative(0, 1, 0)

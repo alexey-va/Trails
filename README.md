@@ -58,10 +58,10 @@ Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition wi
 decay uses `BlockFadeEvent`. Ordinary step-counter increments do not emit world-change events.
 
 Roads are disabled by default and require `trails.roads.manage` (operator by default). A fake-block preview is sent
-only to the builder and never changes server blocks. Its default budget is 2048 blocks for 10 minutes. Materials
-without a full-cube collision shape, such as `DIRT_PATH`, stairs, slabs, fences, and lanterns, are announced in chat
-and represented by full-height yellow concrete in the preview so fake collision cannot trap the client; commit still
-places the selected real block data.
+only to the builder and never changes server blocks. Its default budget is 2048 blocks for 10 minutes. Starting a
+preview emits one compact apply instruction. Materials without a full-cube collision shape, such as `DIRT_PATH`,
+stairs, slabs, fences, and lanterns, are represented by full-height yellow concrete so fake collision cannot trap the
+client; commit still places the selected real block data.
 
 Movement samples up to the configured segment distance are connected continuously over the nearest safe surface.
 The complete route is rebuilt as one plan, so a later turn removes obsolete cross-sections instead of accumulating
@@ -74,8 +74,12 @@ longer jump still paints only its landing
 row instead of silently losing the road or rasterizing the gap; teleports cancel the session. `safe-solid` replacement
 accepts ordinary solid terrain, including stone, while always excluding block entities, ores, liquids, waterlogged
 blocks, unbreakable and technical blocks, plus the configurable protected list. The legacy explicit allowlist mode
-remains available. `limits.max-cross-slope-blocks` prevents wide profiles from painting detached outer strips far
-above or below the centerline on cliffs and broken terrain.
+remains available. Gentle cross-slopes are graded to one row height, filling supported one-block depressions and
+excavating only ordinary replaceable terrain. `limits.max-cross-slope-blocks` bounds that work and prevents wide
+profiles from painting detached outer strips on cliffs. An isolated one-row height spike or depression is flattened,
+while sustained rises still receive transitions. `clearance.height-blocks` and the strict `clearance.materials`
+allowlist remove harmless plants and snow from the walking space; preview, protection checks, compensation, rollback,
+and undo cover those removals exactly.
 
 Each lane and height transition accepts either one material or a weighted map whose integer percentages total 100,
 for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. The selection is stable for the lifetime of one preview.

@@ -507,11 +507,15 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
+            val configPath = plugin.dataFolder.toPath().resolve("config.yml")
+            Files.writeString(configPath, Files.readString(configPath).replace("locale: en-US", "locale: ru-RU"))
             plugin.reloadTrails().isSuccess shouldBe true
 
             server.dispatchCommand(admin, "trails road start rustic") shouldBe true
-            PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage())) shouldContain "DIRT_PATH"
-            PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage())) shouldContain "rustic"
+            val startMessage = PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage()))
+            startMessage shouldContain "Предпросмотр дороги rustic включён"
+            startMessage shouldContain "/trails road commit, чтобы принять изменения"
+            admin.nextComponentMessage() shouldBe null
             plugin.captureRoadMovement(admin, Location(world, 8.5, 65.0, 0.5)) shouldBe true
             server.scheduler.performTicks(5)
             world.getBlockAt(4, 64, 0).type shouldBe Material.GRASS_BLOCK

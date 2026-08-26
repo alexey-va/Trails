@@ -3,6 +3,7 @@ package ru.ruscrafting.trails.bukkit
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
+import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.block.data.BlockData
@@ -85,30 +86,9 @@ class RoadManager internal constructor(
                     ),
             )
         sessions[player.uniqueId] = session
-        val substitutedMaterials =
-            (
-                profile.laneMaterials +
-                    settings.heightTransitionPalette(profile)?.materials.orEmpty() +
-                    profile.decorationPatterns.flatMap { pattern ->
-                        pattern.placements.flatMap { it.palette.materials }
-                    }
-            ).distinct()
-                .filter { material -> previewSelector.select(material.createBlockData(), center.location).substituted }
-        val notices =
-            if (substitutedMaterials.isEmpty()) {
-                emptyList()
-            } else {
-                listOf(
-                    RoadNotice(
-                        "messages.roadPreviewFallback",
-                        mapOf("%materials%" to substitutedMaterials.joinToString { it.name }),
-                    ),
-                )
-            }
         return RoadResult(
             "messages.roadStarted",
-            mapOf("%profile%" to profile.name, "%limit%" to settings.maxPlannedBlocks.toString()),
-            notices,
+            mapOf("%profile%" to profile.name),
         )
     }
 
@@ -165,7 +145,9 @@ class RoadManager internal constructor(
         refreshPlan(player, session)
         if (session.planned.isEmpty()) return RoadResult("messages.roadEmpty")
         val resolved = session.planned.values.mapNotNull { resolve(world, it) }
-        if (resolved.size != session.planned.size || resolved.any { !validCurrent(it) }) return RoadResult("messages.roadConflict")
+        if (resolved.size != session.planned.size || resolved.any { !validCurrent(it, session.planned) }) {
+            return RoadResult("messages.roadConflict")
+        }
         for ((block, planned) in resolved) {
             if (!plugin.canRoadChange(player, block, planned.afterData.material)) {
                 return RoadResult("messages.roadProtected")
@@ -198,7 +180,7 @@ class RoadManager internal constructor(
                     )
                 applied += record
                 plugin.placeRoad(player.name, block, planned.afterData)
-                applied[applied.lastIndex] = record.copy(afterState = checkNotNull(plugin.inspectTrail(block)))
+                applied[applied.lastIndex] = record.copy(afterState = plugin.inspectTrail(block))
             }
         } catch (error: Exception) {
             rollback(world, applied)
@@ -347,10 +329,18 @@ class RoadManager internal constructor(
         val sections = session.routeSections.map { section -> resolveSection(player.world, session.profile, section) }
 
         sections.flatMap(BuiltRoadSection::rows).forEach { row ->
-            row.cells.forEach { (lane, block) ->
+            row.cells.forEach { (lane, cell) ->
+                val block = cell.surface
                 val palette = session.profile.lanePalettes[lane + session.profile.width / 2]
                 val material = palette.select(paletteSample(session, block, lane, PlanRole.SURFACE))
                 planBlock(session, draft, block, lane, material.createBlockData(), PlanRole.SURFACE)
+            }
+        }
+        sections.flatMap(BuiltRoadSection::rows).forEach { row ->
+            row.cells.forEach { (lane, cell) ->
+                cell.clearance.forEach { block ->
+                    planBlock(session, draft, block, lane, Material.AIR.createBlockData(), PlanRole.CLEARANCE)
+                }
             }
         }
         settings.heightTransitionPalette(session.profile)?.let { transitionPalette ->
@@ -419,25 +409,71 @@ class RoadManager internal constructor(
                 }
             }
         var referenceY = section.samples.first().y
+        val centerSurfaces =
+            geometryRows.map { directed ->
+                val center = directed.row.center
+                surfaceAt(world, center.x, center.z, referenceY)?.also { referenceY = it.y }
+            }
+        val rowGrades = RoadGeometry.smoothIsolatedGrades(centerSurfaces.map { it?.y })
         val rows =
             geometryRows.mapIndexedNotNull { sequence, directed ->
-                val center = directed.row.center
-                val centerBlock = surfaceAt(world, center.x, center.z, referenceY) ?: return@mapIndexedNotNull null
-                referenceY = centerBlock.y
+                val centerSurface = centerSurfaces[sequence] ?: return@mapIndexedNotNull null
+                val rowGrade = rowGrades[sequence] ?: return@mapIndexedNotNull null
                 ResolvedRoadRow(
                     sequence = sequence,
-                    center = center,
+                    center = directed.row.center,
                     headingFrom = directed.headingFrom,
                     headingTo = directed.headingTo,
                     cells =
                         directed.row.cells.mapNotNull { cell ->
-                            surfaceAt(world, cell.x, cell.z, centerBlock.y)
-                                ?.takeIf { block -> abs(block.y - centerBlock.y) <= settings.maxCrossSlopeBlocks }
-                                ?.let { block -> cell.lane to block }
+                            val naturalSurface =
+                                if (cell.lane == 0) {
+                                    centerSurface
+                                } else {
+                                    surfaceAt(world, cell.x, cell.z, rowGrade)
+                                }
+                            naturalSurface
+                                ?.takeIf { block -> abs(block.y - rowGrade) <= settings.maxCrossSlopeBlocks }
+                                ?.let { block -> resolveRoadCell(world, cell.x, cell.z, rowGrade, block) }
+                                ?.let { resolved -> cell.lane to resolved }
                         }.toMap(),
-                )
+                ).takeIf { 0 in it.cells }
             }
         return BuiltRoadSection(geometryRows, rows, section.countFirstRow)
+    }
+
+    private fun resolveRoadCell(
+        world: World,
+        x: Int,
+        z: Int,
+        rowGrade: Int,
+        naturalSurface: Block,
+    ): ResolvedRoadCell? {
+        if (rowGrade !in world.minHeight until world.maxHeight) return null
+        val surface = world.getBlockAt(x, rowGrade, z)
+        if (!surfacePolicy.canPlaceSurface(surface)) return null
+
+        val clearance = linkedMapOf<BlockKey, Block>()
+        if (naturalSurface.y > rowGrade) {
+            for (y in rowGrade + 1..naturalSurface.y) {
+                val block = world.getBlockAt(x, y, z)
+                if (!surfacePolicy.canExcavate(block)) return null
+                clearance[BlockKey(x, y, z)] = block
+            }
+        }
+        for (offset in 1..settings.clearanceHeightBlocks) {
+            val y = rowGrade + offset
+            if (y >= world.maxHeight) return null
+            val block = world.getBlockAt(x, y, z)
+            val key = BlockKey(x, y, z)
+            if (block.type.isAir || key in clearance) continue
+            when {
+                surfacePolicy.canClearAbove(block) -> clearance[key] = block
+                surfacePolicy.canRemainAboveRoad(block) -> Unit
+                else -> return null
+            }
+        }
+        return ResolvedRoadCell(surface, clearance.values.toList())
     }
 
     private fun planHeightTransitions(
@@ -448,13 +484,13 @@ class RoadManager internal constructor(
     ) {
         rows.zipWithNext().forEach { (fromRow, toRow) ->
             if (toRow.sequence != fromRow.sequence + 1) return@forEach
-            val fromCenter = fromRow.cells[0] ?: return@forEach
-            val toCenter = toRow.cells[0] ?: return@forEach
+            val fromCenter = fromRow.cells[0]?.surface ?: return@forEach
+            val toCenter = toRow.cells[0]?.surface ?: return@forEach
             val centerHeightDifference = toCenter.y - fromCenter.y
             if (abs(centerHeightDifference) != 1) return@forEach
             fromRow.cells.keys.intersect(toRow.cells.keys).forEach { lane ->
-                val fromBlock = fromRow.cells.getValue(lane)
-                val toBlock = toRow.cells.getValue(lane)
+                val fromBlock = fromRow.cells.getValue(lane).surface
+                val toBlock = toRow.cells.getValue(lane).surface
                 if (toBlock.y - fromBlock.y != centerHeightDifference) return@forEach
                 val ascending = centerHeightDifference > 0
                 val highBlock = if (ascending) toBlock else fromBlock
@@ -480,7 +516,7 @@ class RoadManager internal constructor(
         row: ResolvedRoadRow,
     ) {
         draft.traversedBlocks++
-        val anchor = row.cells[0] ?: return
+        val anchor = row.cells[0]?.surface ?: return
         session.profile.decorationPatterns.forEach { pattern ->
             if (draft.traversedBlocks % pattern.everyBlocks != 0L) return@forEach
             val occurrence = draft.traversedBlocks / pattern.everyBlocks
@@ -570,19 +606,45 @@ class RoadManager internal constructor(
         current.forEach { (key, planned) ->
             if (previous[key]?.afterData?.asString == planned.afterData.asString) return@forEach
             val block = player.world.getBlockAt(key.x, key.y, key.z)
-            val previewData = previewSelector.select(planned.afterData, block.location).blockData
+            val previewData =
+                if (planned.role == PlanRole.CLEARANCE && surfacePolicy.canClearAbove(block)) {
+                    planned.afterData
+                } else {
+                    previewSelector.select(planned.afterData, block.location).blockData
+                }
             player.sendBlockChange(block.location, previewData)
         }
     }
 
-    private fun validCurrent(pair: Pair<Block, PlannedBlock>): Boolean {
+    private fun validCurrent(
+        pair: Pair<Block, PlannedBlock>,
+        plan: Map<BlockKey, PlannedBlock>,
+    ): Boolean {
         val (block, planned) = pair
         if (block.blockData.asString != planned.beforeData) return false
-        return if (planned.role == PlanRole.DECORATION) {
-            block.type.isAir
-        } else {
-            surfacePolicy.canReplace(block) && surfacePolicy.hasWalkableTop(block)
+        return when (planned.role) {
+            PlanRole.DECORATION -> block.type.isAir
+            PlanRole.CLEARANCE -> surfacePolicy.canExcavate(block) || surfacePolicy.canClearAbove(block)
+            PlanRole.SURFACE,
+            PlanRole.HEIGHT_TRANSITION,
+            -> surfacePolicy.canPlaceSurface(block) && roadClearanceStillValid(block, plan)
         }
+    }
+
+    private fun roadClearanceStillValid(
+        surface: Block,
+        plan: Map<BlockKey, PlannedBlock>,
+    ): Boolean {
+        for (offset in 1..settings.clearanceHeightBlocks) {
+            val y = surface.y + offset
+            if (y >= surface.world.maxHeight) return false
+            val above = surface.world.getBlockAt(surface.x, y, surface.z)
+            if (above.type.isAir) continue
+            val planned = plan[BlockKey(above.x, above.y, above.z)]
+            if (planned?.role == PlanRole.CLEARANCE || surfacePolicy.canRemainAboveRoad(above)) continue
+            return false
+        }
+        return true
     }
 
     private fun surfaceAt(
@@ -727,7 +789,12 @@ class RoadManager internal constructor(
         val center: RoadPoint,
         val headingFrom: RoadPoint,
         val headingTo: RoadPoint,
-        val cells: Map<Int, Block>,
+        val cells: Map<Int, ResolvedRoadCell>,
+    )
+
+    private data class ResolvedRoadCell(
+        val surface: Block,
+        val clearance: List<Block>,
     )
 
     private data class DirectedRoadRow(
@@ -758,7 +825,8 @@ class RoadManager internal constructor(
     private enum class PlanRole(val priority: Int) {
         SURFACE(0),
         HEIGHT_TRANSITION(1),
-        DECORATION(2),
+        CLEARANCE(2),
+        DECORATION(3),
     }
 
     private data class Session(

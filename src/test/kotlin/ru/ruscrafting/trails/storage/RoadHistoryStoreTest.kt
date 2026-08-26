@@ -74,4 +74,36 @@ class RoadHistoryStoreTest :
                 folder.toFile().deleteRecursively()
             }
         }
+
+        "preserves an intentionally cleared block without an air PDC entry" {
+            val folder = Files.createTempDirectory("trails-cleared-road-history-")
+            try {
+                val expected =
+                    linkedMapOf(
+                        UUID.randomUUID() to
+                            RoadCommitRecord(
+                                UUID.randomUUID(),
+                                6789L,
+                                listOf(
+                                    RoadBlockRecord(
+                                        2,
+                                        65,
+                                        3,
+                                        "minecraft:short_grass",
+                                        "minecraft:air",
+                                        null,
+                                        null,
+                                    ),
+                                ),
+                            ),
+                    )
+                val store = RoadHistoryStore(folder)
+
+                store.save(expected)
+
+                store.load() shouldBe expected
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
     })

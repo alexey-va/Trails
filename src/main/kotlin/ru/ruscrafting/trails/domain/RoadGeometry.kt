@@ -69,6 +69,21 @@ object RoadGeometry {
         width: Int,
     ): List<RoadCell> = rows(from, to, width).flatMap(RoadRow::cells)
 
+    /** Removes a single one-row bump or depression without flattening a sustained grade change. */
+    fun smoothIsolatedGrades(
+        heights: List<Int?>,
+        maxAdjustmentBlocks: Int = 1,
+    ): List<Int?> {
+        require(maxAdjustmentBlocks in 0..4) { "Road grade adjustment must be between 0 and 4" }
+        if (heights.size < 3 || maxAdjustmentBlocks == 0) return heights.toList()
+        return heights.mapIndexed { index, current ->
+            if (index == 0 || index == heights.lastIndex || current == null) return@mapIndexed current
+            val previous = heights[index - 1] ?: return@mapIndexed current
+            val next = heights[index + 1] ?: return@mapIndexed current
+            if (previous == next && abs(current - previous) <= maxAdjustmentBlocks) previous else current
+        }
+    }
+
     fun rows(
         from: RoadPoint,
         to: RoadPoint,
