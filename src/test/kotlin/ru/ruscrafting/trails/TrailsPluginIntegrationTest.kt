@@ -28,6 +28,7 @@ import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
+import org.bukkit.permissions.PermissionDefault
 import org.bukkit.persistence.PersistentDataType
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -91,6 +92,13 @@ class TrailsPluginIntegrationTest :
             adminRoutes shouldContain "road"
             server.getCommandTabComplete(admin, "trails road start ") shouldContain "rustic"
             server.getCommandTabComplete(admin, "trails road list ") shouldContain "forest_walk"
+        }
+
+        "road protection bypass is granted to operators but not regular builders by default" {
+            server.pluginManager.getPermission("trails.roads.bypass-protection")?.default shouldBe PermissionDefault.OP
+            server.addPlayer("RegularRoadBuilder").hasPermission("trails.roads.bypass-protection") shouldBe false
+            server.addPlayer("OperatorRoadBuilder").also { it.isOp = true }
+                .hasPermission("trails.roads.bypass-protection") shouldBe true
         }
 
         "road list command renders the localized description for a selected profile" {
@@ -540,13 +548,13 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(1, 64, 1).type shouldBe committedSideMaterial
         }
 
-        "road plan rebuild keeps the original snapshot and rejects an intervening block change" {
+        "road commit replans an intervening ordinary block change and undo restores the current snapshot" {
             val world = server.addSimpleWorld("arc_qa_flat")
-            val admin = server.addPlayer("SnapshotRoadBuilder")
-            admin.isOp = true
+            val builder = server.addPlayer("SnapshotRoadBuilder")
+            builder.addAttachment(plugin, "trails.roads.manage", true)
             for (x in 0..3) world.getBlockAt(x, 64, 0).type = Material.STONE
             world.loadChunk(0, 0)
-            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            builder.teleport(Location(world, 0.5, 65.0, 0.5))
             val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
             Files.writeString(
                 roadsPath,
@@ -556,14 +564,42 @@ class TrailsPluginIntegrationTest :
             )
             plugin.reloadTrails().isSuccess shouldBe true
 
-            plugin.roadStart(admin, "footpath")
-            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
-            plugin.roadStatus(admin)
+            plugin.roadStart(builder, "footpath")
+            plugin.captureRoadMovement(builder, Location(world, 2.5, 65.0, 0.5))
+            plugin.roadStatus(builder)
             world.getBlockAt(1, 64, 0).type = Material.DIRT
-            plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5))
+            plugin.captureRoadMovement(builder, Location(world, 3.5, 65.0, 0.5))
 
-            plugin.roadCommit(admin).message shouldBe "messages.roadConflict"
+            plugin.roadCommit(builder).message shouldBe "messages.roadCommitted"
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT_PATH
+            plugin.roadUndo(builder).message shouldBe "messages.roadUndone"
             world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT
+        }
+
+        "road commit reloads a previewed chunk before rebuilding the current plan" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val builder = server.addPlayer("UnloadedRoadBuilder")
+            builder.addAttachment(plugin, "trails.roads.manage", true)
+            for (x in 14..18) world.getBlockAt(x, 64, 0).type = Material.STONE
+            world.loadChunk(0, 0)
+            world.loadChunk(1, 0)
+            builder.teleport(Location(world, 14.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(builder, "footpath")
+            plugin.captureRoadMovement(builder, Location(world, 18.5, 65.0, 0.5))
+            plugin.roadStatus(builder)
+            world.unloadChunk(1, 0) shouldBe true
+
+            plugin.roadCommit(builder).message shouldBe "messages.roadCommitted"
+            world.getBlockAt(17, 64, 0).type shouldBe Material.DIRT_PATH
         }
 
         "roads can commit decorative profiles that are not natural trail stages" {
@@ -1143,15 +1179,15 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(2, 64, 0).type shouldBe Material.DIRT_PATH
         }
 
-        "roads commit is all-or-nothing when a protection event vetoes one block" {
+        "roads commit is all-or-nothing for a regular builder when a protection event vetoes one block" {
             val world = server.addSimpleWorld("arc_qa_flat")
-            val admin = server.addPlayer("ProtectedRoadBuilder")
-            admin.isOp = true
+            val builder = server.addPlayer("ProtectedRoadBuilder")
+            builder.addAttachment(plugin, "trails.roads.manage", true)
             for (x in -2..3) {
                 for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.GRASS_BLOCK
             }
             world.loadChunk(0, 0)
-            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            builder.teleport(Location(world, 0.5, 65.0, 0.5))
             val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
             Files.writeString(
                 roadsPath,
@@ -1173,13 +1209,13 @@ class TrailsPluginIntegrationTest :
                 plugin,
             )
 
-            server.dispatchCommand(admin, "trails road start rustic") shouldBe true
-            plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5)) shouldBe true
-            server.dispatchCommand(admin, "trails road commit") shouldBe true
+            server.dispatchCommand(builder, "trails road start rustic") shouldBe true
+            plugin.captureRoadMovement(builder, Location(world, 1.5, 65.0, 0.5)) shouldBe true
+            server.dispatchCommand(builder, "trails road commit") shouldBe true
 
             for (x in 0..1) {
                 for (z in -1..1) world.getBlockAt(x, 64, z).type shouldBe Material.GRASS_BLOCK
             }
-            admin.inventory.contents.filterNotNull().size shouldBe 0
+            builder.inventory.contents.filterNotNull().size shouldBe 0
         }
     })

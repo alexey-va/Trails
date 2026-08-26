@@ -21,6 +21,7 @@ data class RoadSettings(
     val captureWhileFlying: Boolean,
     val smoothingEnabled: Boolean,
     val smoothingToleranceBlocks: Double,
+    val smoothingMaxGradeRunBlocks: Int,
     val clearanceHeightBlocks: Int,
     val clearableMaterials: Set<Material>,
     val replacementMode: RoadReplacementMode,
@@ -208,6 +209,11 @@ object RoadSettingsLoader {
         if (!smoothingTolerance.isFinite() || smoothingTolerance !in 0.0..4.0) {
             problems += "movement.smoothing.tolerance-blocks must be between 0.0 and 4.0"
         }
+        val smoothingMaxGradeRun =
+            if (legacy) 0 else integer(config, "movement.smoothing.max-grade-run-blocks", 3, problems)
+        if (smoothingMaxGradeRun !in 0..16) {
+            problems += "movement.smoothing.max-grade-run-blocks must be between 0 and 16"
+        }
 
         val clearanceHeight = if (legacy) 0 else integer(config, "clearance.height-blocks", 2, problems)
         if (clearanceHeight !in 0..4) problems += "clearance.height-blocks must be between 0 and 4"
@@ -273,6 +279,7 @@ object RoadSettingsLoader {
             captureWhileFlying = captureWhileFlying,
             smoothingEnabled = smoothingEnabled,
             smoothingToleranceBlocks = smoothingTolerance,
+            smoothingMaxGradeRunBlocks = smoothingMaxGradeRun,
             clearanceHeightBlocks = clearanceHeight,
             clearableMaterials = clearable,
             replacementMode = replacementMode,

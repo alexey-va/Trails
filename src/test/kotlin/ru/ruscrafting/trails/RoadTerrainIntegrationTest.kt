@@ -145,6 +145,32 @@ class RoadTerrainIntegrationTest :
             }
         }
 
+        "a short raised plateau is graded away instead of creating two stair walls" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("PlateauRoadBuilder").also { it.isOp = true }
+            for (x in -1..5) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            for (x in 1..3) {
+                for (z in -1..1) world.getBlockAt(x, 65, z).type = Material.STONE
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            enableRoads(plugin)
+
+            plugin.roadStart(admin, "cherry_avenue")
+            plugin.captureRoadMovement(admin, Location(world, 4.5, 65.0, 0.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            for (x in 1..3) {
+                for (z in -1..1) {
+                    world.getBlockAt(x, 65, z).type shouldBe Material.AIR
+                    (world.getBlockAt(x, 64, z).blockData is Stairs) shouldBe false
+                }
+            }
+        }
+
         "consecutive bottom slabs on flat terrain are cleared instead of raising the road" {
             val world = server.addSimpleWorld("arc_qa_flat")
             val admin = server.addPlayer("SlabObstacleRoadBuilder").also { it.isOp = true }
@@ -205,16 +231,17 @@ class RoadTerrainIntegrationTest :
             world.getBlockAt(1, 65, 1).type shouldBe Material.POPPY
         }
 
-        "a protection veto on plant clearance rejects the whole road commit" {
+        "a protection veto on plant clearance rejects a regular builder's whole road commit" {
             val world = server.addSimpleWorld("arc_qa_flat")
-            val admin = server.addPlayer("ProtectedClearanceRoadBuilder").also { it.isOp = true }
+            val builder = server.addPlayer("ProtectedClearanceRoadBuilder")
+            builder.addAttachment(plugin, "trails.roads.manage", true)
             for (x in -1..3) {
                 for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
             }
             world.getBlockAt(1, 65, 0).type = Material.SHORT_GRASS
             world.loadChunk(0, 0)
             world.loadChunk(0, -1)
-            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            builder.teleport(Location(world, 0.5, 65.0, 0.5))
             enableRoads(plugin)
             val listener = object : Listener {}
             server.pluginManager.registerEvent(
@@ -228,12 +255,41 @@ class RoadTerrainIntegrationTest :
                 plugin,
             )
 
-            plugin.roadStart(admin, "rustic")
-            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
+            plugin.roadStart(builder, "rustic")
+            plugin.captureRoadMovement(builder, Location(world, 2.5, 65.0, 0.5))
 
-            plugin.roadCommit(admin).message shouldBe "messages.roadProtected"
+            plugin.roadCommit(builder).message shouldBe "messages.roadProtected"
             world.getBlockAt(1, 65, 0).type shouldBe Material.SHORT_GRASS
             world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
+        }
+
+        "an operator bypasses external road protection without bypassing protected block safety" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("BypassRoadBuilder").also { it.isOp = true }
+            for (x in -1..3) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            enableRoads(plugin)
+            val listener = object : Listener {}
+            server.pluginManager.registerEvent(
+                EntityChangeBlockEvent::class.java,
+                listener,
+                EventPriority.NORMAL,
+                { _, raw -> (raw as EntityChangeBlockEvent).isCancelled = true },
+                plugin,
+            )
+
+            plugin.roadStart(admin, "rustic")
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
+            plugin.roadStatus(admin)
+            world.getBlockAt(1, 64, 1).type = Material.CHEST
+
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT_PATH
+            world.getBlockAt(1, 64, 1).type shouldBe Material.CHEST
         }
     })
 

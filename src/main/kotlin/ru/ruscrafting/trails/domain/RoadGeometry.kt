@@ -69,19 +69,38 @@ object RoadGeometry {
         width: Int,
     ): List<RoadCell> = rows(from, to, width).flatMap(RoadRow::cells)
 
-    /** Removes a single one-row bump or depression without flattening a sustained grade change. */
+    /** Removes short one-block bumps or depressions without flattening a sustained grade change. */
     fun smoothIsolatedGrades(
         heights: List<Int?>,
         maxAdjustmentBlocks: Int = 1,
+        maxRunLength: Int = 1,
     ): List<Int?> {
         require(maxAdjustmentBlocks in 0..4) { "Road grade adjustment must be between 0 and 4" }
-        if (heights.size < 3 || maxAdjustmentBlocks == 0) return heights.toList()
-        return heights.mapIndexed { index, current ->
-            if (index == 0 || index == heights.lastIndex || current == null) return@mapIndexed current
-            val previous = heights[index - 1] ?: return@mapIndexed current
-            val next = heights[index + 1] ?: return@mapIndexed current
-            if (previous == next && abs(current - previous) <= maxAdjustmentBlocks) previous else current
+        require(maxRunLength in 0..16) { "Road grade run length must be between 0 and 16" }
+        if (heights.size < 3 || maxAdjustmentBlocks == 0 || maxRunLength == 0) return heights.toList()
+        val smoothed = heights.toMutableList()
+        var start = 1
+        while (start < heights.lastIndex) {
+            val current = heights[start]
+            if (current == null) {
+                start++
+                continue
+            }
+            var end = start
+            while (end + 1 < heights.lastIndex && heights[end + 1] == current) end++
+            val previous = heights[start - 1]
+            val next = heights[end + 1]
+            if (
+                previous != null &&
+                previous == next &&
+                end - start + 1 <= maxRunLength &&
+                abs(current - previous) <= maxAdjustmentBlocks
+            ) {
+                for (index in start..end) smoothed[index] = previous
+            }
+            start = end + 1
         }
+        return smoothed
     }
 
     fun rows(

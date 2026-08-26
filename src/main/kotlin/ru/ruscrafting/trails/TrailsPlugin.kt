@@ -276,10 +276,14 @@ open class TrailsPlugin : JavaPlugin() {
         block: Block,
         target: Material,
     ): Boolean =
-        checkProtectionResult(
-            player,
-            bukkitEventProtection.canChange(player, block, target, settings.integrations.blockPlaceCompatibilityEvent),
-        )
+        bypassesRoadProtection(player) ||
+            checkProtectionResult(
+                player,
+                bukkitEventProtection.canChange(player, block, target, settings.integrations.blockPlaceCompatibilityEvent),
+            )
+
+    fun bypassesRoadProtection(player: Player): Boolean =
+        player.hasPermission("trails.roads.bypass-protection")
 
     fun placeRoad(
         actor: String,

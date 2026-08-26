@@ -124,6 +124,7 @@ class RoadSettingsLoaderTest :
                 settings.captureWhileFlying shouldBe true
                 settings.smoothingEnabled shouldBe true
                 settings.smoothingToleranceBlocks shouldBe 1.0
+                settings.smoothingMaxGradeRunBlocks shouldBe 3
                 settings.clearanceHeightBlocks shouldBe 2
                 settings.clearableMaterials shouldContain Material.SHORT_GRASS
                 settings.replacementMode shouldBe RoadReplacementMode.SAFE_SOLID
@@ -144,6 +145,7 @@ class RoadSettingsLoaderTest :
                         .replace("max-planned-blocks: 2048", "max-planned-blocks: 4097")
                         .replace("max-cross-slope-blocks: 1", "max-cross-slope-blocks: 5")
                         .replace("tolerance-blocks: 1.0", "tolerance-blocks: 9.0")
+                        .replace("max-grade-run-blocks: 3", "max-grade-run-blocks: 17")
                         .replace("height-blocks: 2", "height-blocks: 5")
                         .replace("materials: [SHORT_GRASS, POPPY]", "materials: [SHORT_GRASS, STONE]")
                         .replace("mode: safe-solid", "mode: everything")
@@ -157,6 +159,7 @@ class RoadSettingsLoaderTest :
                 error.problems shouldContain "limits.max-planned-blocks must be between 1 and 4096"
                 error.problems shouldContain "limits.max-cross-slope-blocks must be between 0 and 4"
                 error.problems shouldContain "movement.smoothing.tolerance-blocks must be between 0.0 and 4.0"
+                error.problems shouldContain "movement.smoothing.max-grade-run-blocks must be between 0 and 16"
                 error.problems shouldContain "clearance.height-blocks must be between 0 and 4"
                 error.problems shouldContain "clearance.materials contains unsafe road obstructions: STONE"
                 error.problems shouldContain "replacement.mode must be 'allowlist' or 'safe-solid'"
@@ -246,6 +249,7 @@ class RoadSettingsLoaderTest :
               smoothing:
                 enabled: true
                 tolerance-blocks: 1.0
+                max-grade-run-blocks: 3
             clearance:
               height-blocks: 2
               materials: [SHORT_GRASS, POPPY]

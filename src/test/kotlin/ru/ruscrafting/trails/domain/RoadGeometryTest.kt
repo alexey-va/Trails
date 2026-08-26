@@ -95,4 +95,13 @@ class RoadGeometryTest :
             RoadGeometry.smoothIsolatedGrades(listOf(64, 65, 65, 66)) shouldBe
                 listOf(64, 65, 65, 66)
         }
+
+        "grade smoothing removes a short plateau bounded by the same road height" {
+            RoadGeometry.smoothIsolatedGrades(listOf(64, 65, 65, 65, 64), maxRunLength = 3) shouldBe
+                listOf(64, 64, 64, 64, 64)
+            RoadGeometry.smoothIsolatedGrades(listOf(64, 63, 63, 64), maxRunLength = 2) shouldBe
+                listOf(64, 64, 64, 64)
+            RoadGeometry.smoothIsolatedGrades(listOf(64, 65, 65, 65, 65, 64), maxRunLength = 3) shouldBe
+                listOf(64, 65, 65, 65, 65, 64)
+        }
     })

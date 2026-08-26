@@ -142,7 +142,20 @@ class RoadManager internal constructor(
         }
         val world = plugin.server.getWorld(session.worldId) ?: return RoadResult("messages.roadConflict")
         if (player.world.uid != session.worldId) return RoadResult("messages.roadConflict")
-        refreshPlan(player, session)
+        val loadedChunks = loadPreviewedChunks(world, session.planned) ?: return RoadResult("messages.roadConflict")
+        try {
+            return commitCurrentPlan(player, session, world)
+        } finally {
+            releaseLoadedChunks(world, loadedChunks)
+        }
+    }
+
+    private fun commitCurrentPlan(
+        player: Player,
+        session: Session,
+        world: World,
+    ): RoadResult {
+        rebuildPlan(player, session, preserveBaseline = false)
         if (session.planned.isEmpty()) return RoadResult("messages.roadEmpty")
         val resolved = session.planned.values.mapNotNull { resolve(world, it) }
         if (resolved.size != session.planned.size || resolved.any { !validCurrent(it, session.planned) }) {
@@ -152,6 +165,12 @@ class RoadManager internal constructor(
             if (!plugin.canRoadChange(player, block, planned.afterData.material)) {
                 return RoadResult("messages.roadProtected")
             }
+        }
+        if (resolved.any { !validCurrent(it, session.planned) }) return RoadResult("messages.roadConflict")
+        if (plugin.bypassesRoadProtection(player)) {
+            plugin.logger.info(
+                "Road protection bypass used by ${player.uniqueId} in ${world.name} for ${resolved.size} planned blocks.",
+            )
         }
         val compensateRemovedBlocks =
             settings.returnReplacedBlocksInSurvival &&
@@ -265,6 +284,11 @@ class RoadManager internal constructor(
                 return RoadResult("messages.roadProtected")
             }
         }
+        if (plugin.bypassesRoadProtection(player)) {
+            plugin.logger.info(
+                "Road undo protection bypass used by ${player.uniqueId} in ${world.name} for ${blocks.size} committed blocks.",
+            )
+        }
         val restored = mutableListOf<RoadBlockRecord>()
         try {
             blocks.forEach { (block, change) ->
@@ -324,8 +348,12 @@ class RoadManager internal constructor(
     private fun rebuildPlan(
         player: Player,
         session: Session,
+        preserveBaseline: Boolean = true,
     ) {
-        val draft = PlanDraft(baseline = LinkedHashMap(session.planned))
+        val draft =
+            PlanDraft(
+                baseline = if (preserveBaseline) LinkedHashMap(session.planned) else emptyMap(),
+            )
         val sections = session.routeSections.map { section -> resolveSection(player.world, session.profile, section) }
 
         sections.flatMap(BuiltRoadSection::rows).forEach { row ->
@@ -414,7 +442,16 @@ class RoadManager internal constructor(
                 val center = directed.row.center
                 surfaceAt(world, center.x, center.z, referenceY)?.also { referenceY = it.y }
             }
-        val rowGrades = RoadGeometry.smoothIsolatedGrades(centerSurfaces.map { it?.y })
+        val sampledGrades = centerSurfaces.map { it?.y }
+        val rowGrades =
+            if (settings.smoothingEnabled) {
+                RoadGeometry.smoothIsolatedGrades(
+                    sampledGrades,
+                    maxRunLength = settings.smoothingMaxGradeRunBlocks,
+                )
+            } else {
+                sampledGrades
+            }
         val rows =
             geometryRows.mapIndexedNotNull { sequence, directed ->
                 val centerSurface = centerSurfaces[sequence] ?: return@mapIndexedNotNull null
@@ -681,6 +718,38 @@ class RoadManager internal constructor(
             null
         }
 
+    private fun loadPreviewedChunks(
+        world: World,
+        plan: Map<BlockKey, PlannedBlock>,
+    ): Set<Pair<Int, Int>>? {
+        val chunks = plan.keys.mapTo(linkedSetOf()) { key -> key.x.shr(4) to key.z.shr(4) }
+        if (chunks.size > MAX_COMMIT_CHUNKS) return null
+        val loaded = linkedSetOf<Pair<Int, Int>>()
+        chunks.forEach { coordinates ->
+            val (x, z) = coordinates
+            if (!world.isChunkLoaded(x, z)) {
+                if (!world.loadChunk(x, z, false)) {
+                    releaseLoadedChunks(world, loaded)
+                    return null
+                }
+                loaded += coordinates
+            }
+        }
+        return loaded
+    }
+
+    private fun releaseLoadedChunks(
+        world: World,
+        chunks: Collection<Pair<Int, Int>>,
+    ) {
+        chunks.forEach { (x, z) ->
+            runCatching { world.unloadChunkRequest(x, z) }
+                .onFailure { error ->
+                    plugin.logger.warning("Could not request release of road commit chunk $x,$z in ${world.name}: ${error.message}")
+                }
+        }
+    }
+
     private fun resolve(world: World, applied: RoadBlockRecord): Pair<Block, RoadBlockRecord>? =
         if (applied.y in world.minHeight until world.maxHeight && world.isChunkLoaded(applied.x shr 4, applied.z shr 4)) {
             world.getBlockAt(applied.x, applied.y, applied.z) to applied
@@ -850,6 +919,7 @@ class RoadManager internal constructor(
     private companion object {
         const val MAX_HISTORY_PLAYERS = 10
         const val MAX_CAPTURED_ROW_MULTIPLIER = 2
+        const val MAX_COMMIT_CHUNKS = 64
         const val RETURN_BLOCKS_PERMISSION = "trails.roads.collect-drops"
     }
 }

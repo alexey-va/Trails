@@ -57,7 +57,9 @@ building; this probe can be disabled under `integrations.protection-events` if a
 Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition without a hard dependency. Natural
 decay uses `BlockFadeEvent`. Ordinary step-counter increments do not emit world-change events.
 
-Roads are disabled by default and require `trails.roads.manage` (operator by default). A fake-block preview is sent
+Roads are disabled by default and require `trails.roads.manage` (operator by default). Operators also receive
+`trails.roads.bypass-protection`, which skips only external claim-plugin probes for road commit and undo; Trails'
+block-entity, ore, liquid, unbreakable, and protected-material rules still apply. A fake-block preview is sent
 only to the builder and never changes server blocks. Its default budget is 2048 blocks for 10 minutes. Starting a
 preview emits one compact apply instruction. Materials without a full-cube collision shape, such as `DIRT_PATH`,
 stairs, slabs, fences, and lanterns, are represented by full-height yellow concrete so fake collision cannot trap the
@@ -67,7 +69,9 @@ Movement samples up to the configured segment distance are connected continuousl
 The complete route is rebuilt as one plan, so a later turn removes obsolete cross-sections instead of accumulating
 crosses and stair clusters. Bounded Ramer-Douglas-Peucker smoothing removes small steering noise; configure it with
 `movement.smoothing.enabled` and `movement.smoothing.tolerance-blocks`, or set the tolerance to `0.0` for the exact
-captured centerline. The effective tolerance never exceeds half the profile width, so every captured point remains
+captured centerline. `movement.smoothing.max-grade-run-blocks` also flattens short one-block-high plateaus and
+depressions that would otherwise create two nearby transition rows; set it to `0` to preserve them. The effective
+tolerance never exceeds half the profile width, so every captured point remains
 inside the road; one-block profiles therefore stay exact. Preview updates are coalesced to the road manager tick and
 sent as a client-only diff. Flying is captured by default when terrain is within the configured search depth. A
 longer jump still paints only its landing
@@ -76,8 +80,8 @@ accepts ordinary solid terrain, including stone, while always excluding block en
 blocks, unbreakable and technical blocks, plus the configurable protected list. The legacy explicit allowlist mode
 remains available. Gentle cross-slopes are graded to one row height, filling supported one-block depressions and
 excavating only ordinary replaceable terrain. `limits.max-cross-slope-blocks` bounds that work and prevents wide
-profiles from painting detached outer strips on cliffs. An isolated one-row height spike or depression is flattened,
-while sustained rises still receive transitions. `clearance.height-blocks` and the strict `clearance.materials`
+profiles from painting detached outer strips on cliffs. Short bounded one-block height spikes or depressions are
+flattened, while sustained rises still receive transitions. `clearance.height-blocks` and the strict `clearance.materials`
 allowlist remove harmless plants and snow from the walking space; preview, protection checks, compensation, rollback,
 and undo cover those removals exactly. A replaceable bottom slab sitting on the current terrain grade is also cleared
 instead of being mistaken for a full-block rise; top/double slabs, waterlogged blocks, and protected materials still
@@ -97,8 +101,10 @@ ancient-tuff, frozen, badlands, volcanic, prismarine, End, and soul-lit themes. 
 and are skipped as a whole if any target is occupied, any part intersects any current or later road column, or the
 complete form would exceed the preview limit.
 
-Commit rechecks loaded chunks, exact block snapshots, surface safety, headroom, form space, and protection events
-before applying the whole plan on the server thread. A failed apply is rolled back. Survival builders with
+Commit reloads already-previewed generated chunks within a fixed resource bound, rebuilds the plan from current world
+state, and then rechecks exact block snapshots, surface safety, headroom, form space, and protection events before
+applying the whole plan on the server thread. This accepts ordinary edits and chunk unloads that happened during the
+preview without overwriting newly protected blocks. A failed apply is rolled back. Survival builders with
 `trails.roads.collect-drops` can receive removed ordinary blocks when the option is enabled; inventory overflow is
 dropped at the builder and owner-locked. A compensated commit is deliberately not undoable, preventing item
 duplication. Other last commits for up to 10 builders are stored atomically in `road-history.yml`; undo succeeds only

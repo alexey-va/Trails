@@ -24,6 +24,8 @@ movement:
     enabled: true
     # Maximum lateral deviation that may be straightened. Set to 0.0 for the exact captured route.
     tolerance-blocks: 1.0
+    # Flatten one-block-high plateaus or depressions no longer than this many road rows. Set to 0 to keep them.
+    max-grade-run-blocks: 3
 
 clearance:
   # Clear this many blocks above the graded road surface. Set to 0 to keep configured vegetation.

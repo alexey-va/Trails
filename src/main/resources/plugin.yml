@@ -59,6 +59,9 @@ permissions:
   trails.roads.manage:
     description: Preview, commit, cancel, and undo Roads plans.
     default: op
+  trails.roads.bypass-protection:
+    description: Commit or undo Roads plans without external protection-plugin checks.
+    default: op
   trails.roads.collect-drops:
     description: Return ordinary blocks removed by a survival Roads commit.
     default: op
