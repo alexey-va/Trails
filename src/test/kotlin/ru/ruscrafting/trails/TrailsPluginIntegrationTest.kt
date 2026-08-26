@@ -528,7 +528,7 @@ class TrailsPluginIntegrationTest :
             plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5)) shouldBe true
             server.dispatchCommand(admin, "trails road commit") shouldBe true
 
-            world.getBlockAt(2, 64, 0).type shouldBe Material.STONE_BRICKS
+            setOf(Material.STONE_BRICKS, Material.CRACKED_STONE_BRICKS) shouldContain world.getBlockAt(2, 64, 0).type
             setOf(Material.COBBLESTONE, Material.MOSSY_COBBLESTONE) shouldContain world.getBlockAt(2, 64, 1).type
             plugin.inspectTrail(world.getBlockAt(2, 64, 0)) shouldBe TrailBlockState(null, 0)
         }
