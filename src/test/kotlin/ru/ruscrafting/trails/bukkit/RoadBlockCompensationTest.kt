@@ -2,6 +2,8 @@ package ru.ruscrafting.trails.bukkit
 
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
+import io.mockk.mockk
+import io.mockk.verify
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.entity.Item
@@ -23,13 +25,18 @@ class RoadBlockCompensationTest :
             player.inventory.contents.indices.forEach { slot ->
                 player.inventory.setItem(slot, ItemStack(Material.COBBLESTONE, 64))
             }
+            val dropped = mockk<Item>(relaxed = true)
+            var droppedStack: ItemStack? = null
 
-            val result = RoadBlockCompensation.deliver(player, listOf(Material.STONE))
+            val result =
+                RoadBlockCompensation.deliver(player, listOf(Material.STONE)) { _, stack ->
+                    droppedStack = stack
+                    dropped
+                }
 
             result.returnedItems shouldBe 1
             result.droppedItems shouldBe 1
-            val dropped = world.entities.filterIsInstance<Item>().single()
-            dropped.itemStack.type shouldBe Material.STONE
-            dropped.owner shouldBe player.uniqueId
+            droppedStack?.type shouldBe Material.STONE
+            verify(exactly = 1) { dropped.owner = player.uniqueId }
         }
     })

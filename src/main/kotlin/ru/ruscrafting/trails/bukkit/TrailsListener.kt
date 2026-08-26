@@ -1,16 +1,29 @@
 package ru.ruscrafting.trails.bukkit
 
 import org.bukkit.Material
+import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
+import org.bukkit.event.block.BlockBurnEvent
+import org.bukkit.event.block.BlockExplodeEvent
+import org.bukkit.event.block.BlockFadeEvent
+import org.bukkit.event.block.BlockFertilizeEvent
+import org.bukkit.event.block.BlockFormEvent
+import org.bukkit.event.block.BlockPistonExtendEvent
+import org.bukkit.event.block.BlockPistonRetractEvent
+import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.block.BlockSpreadEvent
+import org.bukkit.event.block.LeavesDecayEvent
+import org.bukkit.event.entity.EntityChangeBlockEvent
+import org.bukkit.event.entity.EntityExplodeEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerTeleportEvent
+import org.bukkit.event.world.StructureGrowEvent
 import org.bukkit.inventory.EquipmentSlot
 import ru.ruscrafting.trails.TrailsPlugin
 
@@ -33,14 +46,71 @@ class TrailsListener(
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onBreak(event: BlockBreakEvent) {
-        val block = event.block
-        val before = plugin.inspectTrail(block) ?: return
-        plugin.server.scheduler.runTask(
-            plugin,
-            Runnable {
-                if (plugin.inspectTrail(block) == before) plugin.clearTrailData(block)
-            },
-        )
+        plugin.clearTrailData(event.block)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onPlace(event: BlockPlaceEvent) {
+        // BukkitEventProtection sends an unchanged BlockPlaceEvent as a compatibility probe.
+        // Only a real replacement should invalidate persisted trail state.
+        if (event.blockPlaced.blockData == event.blockReplacedState.blockData) return
+        plugin.clearTrailData(event.blockPlaced)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onBurn(event: BlockBurnEvent) {
+        plugin.clearTrailData(event.block)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onFade(event: BlockFadeEvent) {
+        plugin.clearTrailData(event.block)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onForm(event: BlockFormEvent) {
+        plugin.clearTrailData(event.block)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onLeavesDecay(event: LeavesDecayEvent) {
+        plugin.clearTrailData(event.block)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onFertilize(event: BlockFertilizeEvent) {
+        event.blocks.forEach { plugin.clearTrailData(it.block) }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onStructureGrow(event: StructureGrowEvent) {
+        event.blocks.forEach { plugin.clearTrailData(it.block) }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onEntityChangeBlock(event: EntityChangeBlockEvent) {
+        if (event.entity is Player) return
+        plugin.clearTrailData(event.block)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onBlockExplosion(event: BlockExplodeEvent) {
+        event.blockList().forEach(plugin::clearTrailData)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onEntityExplosion(event: EntityExplodeEvent) {
+        event.blockList().forEach(plugin::clearTrailData)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onPistonExtend(event: BlockPistonExtendEvent) {
+        plugin.moveTrailData(event.blocks, event.direction)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onPistonRetract(event: BlockPistonRetractEvent) {
+        plugin.moveTrailData(event.blocks, event.direction.oppositeFace)
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

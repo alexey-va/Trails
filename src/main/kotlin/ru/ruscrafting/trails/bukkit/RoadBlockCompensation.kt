@@ -1,6 +1,7 @@
 package ru.ruscrafting.trails.bukkit
 
 import org.bukkit.Material
+import org.bukkit.entity.Item
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 
@@ -13,6 +14,9 @@ internal object RoadBlockCompensation {
     fun deliver(
         player: Player,
         removedMaterials: Collection<Material>,
+        dropItem: (Player, ItemStack) -> Item = { owner, stack ->
+            owner.world.dropItemNaturally(owner.location, stack)
+        },
     ): RoadBlockDelivery {
         val stacks =
             removedMaterials
@@ -24,7 +28,7 @@ internal object RoadBlockCompensation {
         stacks.forEach { stack ->
             player.inventory.addItem(stack).values.forEach { leftover ->
                 dropped += leftover.amount
-                player.world.dropItemNaturally(player.location, leftover) { item -> item.owner = player.uniqueId }
+                dropItem(player, leftover).owner = player.uniqueId
             }
         }
         return RoadBlockDelivery(stacks.sumOf(ItemStack::getAmount), dropped)

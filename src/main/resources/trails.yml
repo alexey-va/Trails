@@ -2,7 +2,7 @@
 config-version: 1
 
 trails:
-  # IDs are persisted in block metadata. Rename an existing ID only when you intend to start a new trail identity.
+  # IDs are persisted in the owning chunk. Rename an existing ID only when you intend to start a new trail identity.
   DirtPath:
     # Used when several definitions start from the same material.
     selection-weight: 1

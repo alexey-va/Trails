@@ -9,6 +9,8 @@ limits:
   max-planned-blocks: 2048
   preview-expiry-seconds: 600
   surface-search-depth: 8
+  # Skip outer lane cells on sharp cross-slopes instead of painting disconnected strips far above or below the center.
+  max-cross-slope-blocks: 1
   # Fill a continuous road when movement events arrive several blocks apart. Larger jumps start a new segment.
   max-segment-distance-blocks: 48
   # Prevent a sudden vertical move from painting through cliffs or floors.
@@ -17,6 +19,11 @@ limits:
 movement:
   # Road preview may follow builders flying close enough to a safe surface. Teleports still cancel the session.
   capture-while-flying: true
+  smoothing:
+    # Remove small left/right steering noise while retaining endpoints and deliberate turns.
+    enabled: true
+    # Maximum lateral deviation that may be straightened. Set to 0.0 for the exact captured route.
+    tolerance-blocks: 1.0
 
 replacement:
   # safe-solid accepts ordinary solid terrain. allowlist uses only replaceable-materials and road profile blocks.

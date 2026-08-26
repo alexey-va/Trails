@@ -11,6 +11,7 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import org.bukkit.Location
 import org.bukkit.GameMode
+import org.bukkit.NamespacedKey
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.type.Slab
 import org.bukkit.block.data.type.Stairs
@@ -20,12 +21,14 @@ import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.block.BlockFadeEvent
+import org.bukkit.event.block.BlockPistonRetractEvent
 import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.trails.bukkit.RoadNotice
@@ -156,7 +159,7 @@ class TrailsPluginIntegrationTest :
             server.scheduler.pendingTasks.count { it.owner == plugin } shouldBe initialTasks
         }
 
-        "five successful walks advance the default DirtPath and preserve block metadata" {
+        "five successful walks advance the default DirtPath and preserve block state" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("Walker")
             val block = world.getBlockAt(0, 64, 0)
@@ -167,6 +170,17 @@ class TrailsPluginIntegrationTest :
             block.type shouldBe Material.DIRT
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
             plugin.inspectTrail(block)?.walks shouldBe 0
+            block.chunk.persistentDataContainer.has(
+                NamespacedKey(plugin, "block_states_v1"),
+                PersistentDataType.BYTE_ARRAY,
+            ) shouldBe false
+
+            server.scheduler.performTicks(20)
+
+            block.chunk.persistentDataContainer.has(
+                NamespacedKey(plugin, "block_states_v1"),
+                PersistentDataType.BYTE_ARRAY,
+            ) shouldBe true
         }
 
         "the registered movement listener adapts block changes into trail progress" {
@@ -371,7 +385,7 @@ class TrailsPluginIntegrationTest :
             player.walkSpeed shouldNotBe 0.2F
         }
 
-        "the trail tool advances immediately and block breaking clears legacy metadata" {
+        "the trail tool advances immediately and block breaking clears persisted state" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("Builder")
             val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
@@ -381,8 +395,24 @@ class TrailsPluginIntegrationTest :
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
 
             server.pluginManager.callEvent(BlockBreakEvent(block, player))
-            server.scheduler.performTicks(1)
             plugin.inspectTrail(block) shouldBe null
+        }
+
+        "a retracting sticky piston moves persisted trail state toward the piston" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("PistonWalker")
+            val piston = world.getBlockAt(0, 64, 0).also { it.type = Material.STICKY_PISTON }
+            val destination = world.getBlockAt(1, 64, 0)
+            val source = world.getBlockAt(2, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            plugin.forceTrail(player, source)
+            val state = plugin.inspectTrail(source)
+
+            server.pluginManager.callEvent(
+                BlockPistonRetractEvent(piston, listOf(source), BlockFace.EAST),
+            )
+
+            plugin.inspectTrail(source) shouldBe null
+            plugin.inspectTrail(destination) shouldBe state
         }
 
         "natural material decay fires BlockFadeEvent and respects cancellation" {
@@ -487,7 +517,7 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(4, 64, 0).type shouldBe Material.GRASS_BLOCK
 
             server.dispatchCommand(admin, "trails road commit") shouldBe true
-            world.getBlockAt(4, 64, 0).type shouldBe Material.DIRT_PATH
+            setOf(Material.DIRT_PATH, Material.COARSE_DIRT) shouldContain world.getBlockAt(4, 64, 0).type
             plugin.inspectTrail(world.getBlockAt(4, 64, 0))?.walks shouldBe 0
 
             server.dispatchCommand(admin, "trails road undo") shouldBe true
@@ -504,6 +534,32 @@ class TrailsPluginIntegrationTest :
 
             world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
             world.getBlockAt(1, 64, 1).type shouldBe committedSideMaterial
+        }
+
+        "road plan rebuild keeps the original snapshot and rejects an intervening block change" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("SnapshotRoadBuilder")
+            admin.isOp = true
+            for (x in 0..3) world.getBlockAt(x, 64, 0).type = Material.STONE
+            world.loadChunk(0, 0)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "footpath")
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
+            plugin.roadStatus(admin)
+            world.getBlockAt(1, 64, 0).type = Material.DIRT
+            plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5))
+
+            plugin.roadCommit(admin).message shouldBe "messages.roadConflict"
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT
         }
 
         "roads can commit decorative profiles that are not natural trail stages" {
@@ -631,6 +687,121 @@ class TrailsPluginIntegrationTest :
             slab.type shouldBe Slab.Type.BOTTOM
         }
 
+        "road smoothing removes obsolete edges while keeping captured points inside the road" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("SmoothRoadBuilder")
+            admin.isOp = true
+            for (x in -2..6) {
+                for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "rustic")
+            plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 1.5))
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
+            plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 1.5))
+            plugin.captureRoadMovement(admin, Location(world, 4.5, 65.0, 0.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            setOf(Material.DIRT_PATH, Material.COARSE_DIRT, Material.ROOTED_DIRT, Material.PODZOL) shouldContain
+                world.getBlockAt(1, 64, 1).type
+            world.getBlockAt(-1, 64, 0).type shouldBe Material.STONE
+        }
+
+        "turning the route does not retain an obsolete cross-section" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("TurningRoadBuilder")
+            admin.isOp = true
+            for (x in -2..5) {
+                for (z in -2..4) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]")
+                    .replace("    tolerance-blocks: 1.0", "    tolerance-blocks: 0.0"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "rustic")
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 2.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            world.getBlockAt(3, 64, 0).type shouldBe Material.STONE
+            setOf(Material.DIRT_PATH, Material.COARSE_DIRT, Material.ROOTED_DIRT, Material.PODZOL) shouldContain
+                world.getBlockAt(2, 64, 1).type
+        }
+
+        "side-slope changes do not create stairs while the road center stays level" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("LevelRoadBuilder")
+            admin.isOp = true
+            for (x in 0..1) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            world.getBlockAt(1, 65, 1).type = Material.STONE
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "rustic")
+            plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            (world.getBlockAt(1, 65, 1).blockData is Stairs) shouldBe false
+        }
+
+        "sharp cross-slopes do not create detached outer road strips" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("CrossSlopeRoadBuilder")
+            admin.isOp = true
+            for (x in 0..1) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            for (y in 65..67) world.getBlockAt(1, y, 1).type = Material.STONE
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "rustic")
+            plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            world.getBlockAt(1, 67, 1).type shouldBe Material.STONE
+        }
+
         "periodic road forms rotate with the route and alternate lantern sides" {
             val world = server.addSimpleWorld("arc_qa_flat")
             val admin = server.addPlayer("LanternRoadBuilder")
@@ -716,6 +887,35 @@ class TrailsPluginIntegrationTest :
             plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(12, 65, 2).type shouldBe Material.CHEST
+            world.getBlockAt(12, 66, 2).type shouldBe Material.AIR
+            world.getBlockAt(12, 67, 2).type shouldBe Material.AIR
+        }
+
+        "periodic road forms skip a structure intersecting a later road section" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("LoopingLanternRoadBuilder")
+            admin.isOp = true
+            for (x in -2..14) {
+                for (z in -2..4) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "lantern_lane")
+            plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 0.5))
+            plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 2.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            world.getBlockAt(12, 65, 2).type shouldBe Material.AIR
             world.getBlockAt(12, 66, 2).type shouldBe Material.AIR
             world.getBlockAt(12, 67, 2).type shouldBe Material.AIR
         }

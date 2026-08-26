@@ -51,4 +51,41 @@ class RoadGeometryTest :
                     setOf(row.center.z - 1, row.center.z, row.center.z + 1)
             }
         }
+
+        "smoothing removes one-block steering noise while preserving endpoints" {
+            val points =
+                listOf(
+                    RoadPoint(0, 0),
+                    RoadPoint(1, 1),
+                    RoadPoint(2, 0),
+                    RoadPoint(3, 1),
+                    RoadPoint(4, 0),
+                )
+
+            RoadGeometry.smooth(points, toleranceBlocks = 1.0) shouldBe
+                listOf(RoadPoint(0, 0), RoadPoint(4, 0))
+        }
+
+        "smoothing keeps a deliberate corner beyond the configured tolerance" {
+            val points =
+                listOf(
+                    RoadPoint(0, 0),
+                    RoadPoint(4, 0),
+                    RoadPoint(4, 4),
+                )
+
+            RoadGeometry.smooth(points, toleranceBlocks = 1.0) shouldBe points
+        }
+
+        "smoothing zero preserves the captured route exactly" {
+            val points = listOf(RoadPoint(0, 0), RoadPoint(1, 1), RoadPoint(2, 0))
+
+            RoadGeometry.smooth(points, toleranceBlocks = 0.0) shouldBe points
+        }
+
+        "a disconnected landing row uses only the endpoint even for a huge jump" {
+            val landing = RoadPoint(30_000_000, 30_000_000)
+
+            RoadGeometry.row(landing, RoadPoint(-30_000_000, -30_000_000), landing, 3).cells.size shouldBe 3
+        }
     })

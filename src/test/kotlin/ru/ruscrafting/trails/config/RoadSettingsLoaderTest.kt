@@ -5,10 +5,16 @@ import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import org.bukkit.Material
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.nio.file.Files
 
 class RoadSettingsLoaderTest :
     FreeSpec({
+        lateinit var runtime: MockBukkitTestRuntime
+
+        beforeTest { runtime = MockBukkitTestRuntime.open() }
+        afterTest { runtime.close() }
+
         "loads bounded opt-in road profiles" {
             val folder = Files.createTempDirectory("trails-roads-")
             try {
@@ -111,8 +117,11 @@ class RoadSettingsLoaderTest :
                 settings.configVersion shouldBe 2
                 settings.maxPlannedBlocks shouldBe 2048
                 settings.surfaceSearchDepth shouldBe 8
+                settings.maxCrossSlopeBlocks shouldBe 1
                 settings.maxSegmentDistanceBlocks shouldBe 48
                 settings.captureWhileFlying shouldBe true
+                settings.smoothingEnabled shouldBe true
+                settings.smoothingToleranceBlocks shouldBe 1.0
                 settings.replacementMode shouldBe RoadReplacementMode.SAFE_SOLID
                 settings.protectedMaterials shouldContain Material.DIAMOND_BLOCK
                 settings.returnReplacedBlocksInSurvival shouldBe true
@@ -129,6 +138,8 @@ class RoadSettingsLoaderTest :
                     folder,
                     validRoadsV2()
                         .replace("max-planned-blocks: 2048", "max-planned-blocks: 4097")
+                        .replace("max-cross-slope-blocks: 1", "max-cross-slope-blocks: 5")
+                        .replace("tolerance-blocks: 1.0", "tolerance-blocks: 9.0")
                         .replace("mode: safe-solid", "mode: everything")
                         .replace("default-material: OAK_STAIRS", "default-material: BEDROCK")
                         .replace("lanes: [COARSE_DIRT, DIRT_PATH, COARSE_DIRT]", "lanes: [DIRT, CHEST, DIRT]")
@@ -138,6 +149,8 @@ class RoadSettingsLoaderTest :
                 val error = shouldThrow<TrailsSettingsException> { RoadSettingsLoader.load(YamlConfig(folder, "roads.yml")) }
 
                 error.problems shouldContain "limits.max-planned-blocks must be between 1 and 4096"
+                error.problems shouldContain "limits.max-cross-slope-blocks must be between 0 and 4"
+                error.problems shouldContain "movement.smoothing.tolerance-blocks must be between 0.0 and 4.0"
                 error.problems shouldContain "replacement.mode must be 'allowlist' or 'safe-solid'"
                 error.problems shouldContain "height-transitions.default-materials uses unsafe material 'BEDROCK'"
                 error.problems shouldContain "profiles.rustic.lanes[1] uses unsafe material 'CHEST'"
@@ -217,10 +230,14 @@ class RoadSettingsLoaderTest :
               max-planned-blocks: 2048
               preview-expiry-seconds: 600
               surface-search-depth: 8
+              max-cross-slope-blocks: 1
               max-segment-distance-blocks: 48
               max-segment-height-difference-blocks: 8
             movement:
               capture-while-flying: true
+              smoothing:
+                enabled: true
+                tolerance-blocks: 1.0
             replacement:
               mode: safe-solid
               protected-materials: [DIAMOND_BLOCK]
@@ -245,10 +262,14 @@ class RoadSettingsLoaderTest :
               max-planned-blocks: 2048
               preview-expiry-seconds: 600
               surface-search-depth: 8
+              max-cross-slope-blocks: 1
               max-segment-distance-blocks: 48
               max-segment-height-difference-blocks: 8
             movement:
               capture-while-flying: true
+              smoothing:
+                enabled: true
+                tolerance-blocks: 1.0
             replacement:
               mode: safe-solid
               protected-materials: []

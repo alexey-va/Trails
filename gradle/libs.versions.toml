@@ -2,17 +2,15 @@
 kotlin = "2.4.10"
 shadow = "9.6.1"
 paper = "1.21.11-R0.1-SNAPSHOT"
-custom-block-data = "2.2.5"
 bstats = "3.2.1"
 coreprotect = "23.2"
 placeholder-api = "2.12.3"
 kotest = "6.2.4"
 mockk = "1.14.11"
-arc-core = "1.0.1"
+arc-core = "2.0.0"
 
 [libraries]
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
-custom-block-data = { module = "com.jeff-media:custom-block-data", version.ref = "custom-block-data" }
 bstats-bukkit = { module = "org.bstats:bstats-bukkit", version.ref = "bstats" }
 coreprotect = { module = "net.coreprotect:coreprotect", version.ref = "coreprotect" }
 placeholder-api = { module = "me.clip:placeholderapi", version.ref = "placeholder-api" }
@@ -20,6 +18,7 @@ kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref 
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 arc-core-paper-testing = { module = "ru.ruscrafting.arc:arc-core-paper-testing", version.ref = "arc-core" }
+arc-core-paper = { module = "ru.ruscrafting.arc:arc-core-paper", version.ref = "arc-core" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 
 [plugins]

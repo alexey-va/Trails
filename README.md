@@ -7,8 +7,8 @@ the existing Trails Spigot resource.
 ## Compatibility
 
 - Paper/Purpur 1.21.11
-- Java 21 or newer
-- Existing Trails 1.9 `config.yml`, `players.yml`, locale files, and block metadata
+- Java 25
+- Existing Trails 1.9 `config.yml`, `players.yml`, and locale files
 - Optional CoreProtect and PlaceholderAPI integrations
 
 Claim plugins are supported through cancellable Bukkit events instead of private or reflection-based APIs.
@@ -21,14 +21,15 @@ Trails 2.2 uses three versioned operator files:
 - `trails.yml` contains structured, weighted trail definitions and their stages.
 - `roads.yml` contains the opt-in Roads safety limits, world allowlist, weighted palettes, periodic forms, and profiles.
 
-Every duration and percentage states its unit in the key. Trail IDs such as `DirtPath` are persisted in block
-metadata and should not be renamed casually.
+Every duration and percentage states its unit in the key. Trail IDs such as `DirtPath` are persisted in the owning
+chunk and should not be renamed casually.
 
 When a 1.9 `config.yml` is detected, Trails validates it completely, writes `config.v1.backup.yml`, generates the
 current files through temporary files, validates the generated result, and replaces `config.yml` last. Schema v2 is
 likewise migrated to v3 with `config.v2.backup.yml`; obsolete plugin-specific adapter settings are intentionally
-dropped. A failed migration leaves the old file untouched. `players.yml` and the `trails:w` / `trails:n` block keys
-are never rewritten by the config migrator.
+dropped. A failed migration leaves the old file untouched. `players.yml` is never rewritten by the config migrator.
+Legacy per-block `trails:w` / `trails:n` data is intentionally not read or migrated; Trails 2.2 starts block progress
+in a compact checksum-protected chunk-PDC v1 store.
 
 Bundled locales use MiniMessage. Existing locale files without a `format` key continue to use legacy ampersand
 colors and inherit missing bundled messages without being overwritten. Dynamic values such as player names are
@@ -63,21 +64,30 @@ and represented by full-height yellow concrete in the preview so fake collision 
 places the selected real block data.
 
 Movement samples up to the configured segment distance are connected continuously over the nearest safe surface.
-Flying is captured by default when terrain is within the configured search depth. A longer jump still paints its
-landing row instead of silently losing the road; teleports cancel the session. `safe-solid` replacement accepts
-ordinary solid terrain, including stone, while always excluding block entities, ores, liquids, waterlogged blocks,
-unbreakable and technical blocks, plus the configurable protected list. The legacy explicit allowlist mode remains
-available.
+The complete route is rebuilt as one plan, so a later turn removes obsolete cross-sections instead of accumulating
+crosses and stair clusters. Bounded Ramer-Douglas-Peucker smoothing removes small steering noise; configure it with
+`movement.smoothing.enabled` and `movement.smoothing.tolerance-blocks`, or set the tolerance to `0.0` for the exact
+captured centerline. The effective tolerance never exceeds half the profile width, so every captured point remains
+inside the road; one-block profiles therefore stay exact. Preview updates are coalesced to the road manager tick and
+sent as a client-only diff. Flying is captured by default when terrain is within the configured search depth. A
+longer jump still paints only its landing
+row instead of silently losing the road or rasterizing the gap; teleports cancel the session. `safe-solid` replacement
+accepts ordinary solid terrain, including stone, while always excluding block entities, ores, liquids, waterlogged
+blocks, unbreakable and technical blocks, plus the configurable protected list. The legacy explicit allowlist mode
+remains available. `limits.max-cross-slope-blocks` prevents wide profiles from painting detached outer strips far
+above or below the centerline on cliffs and broken terrain.
 
 Each lane and height transition accepts either one material or a weighted map whose integer percentages total 100,
 for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. The selection is stable for the lifetime of one preview.
 One-block height changes can use bottom slabs or direction-aware bottom stairs; stairs face along the road toward the
-higher end. Periodic forms are reusable rotated structures with forward, lateral, and vertical offsets. Their interval,
-side alternation, placements, and weighted materials are configurable. The bundled `lantern_lane` profile places an
-alternating cobblestone-wall, fence, and lantern post every 12 blocks. The bundled catalog now contains 21 profiles,
-including forest, cherry, alpine, royal, ancient-tuff, frozen, badlands, volcanic, prismarine, End, and soul-lit
-themes. Forms must remain outside road lanes and are skipped as a whole if any target is occupied or the complete
-form would exceed the preview limit.
+higher end. A height transition is emitted only when the centerline changes height and a lane follows the same step,
+which prevents isolated side slopes from producing sideways stair tangles. Periodic forms are reusable rotated
+structures with forward, lateral, and vertical offsets. Their interval, side alternation, placements, and weighted
+materials are configurable. The bundled `lantern_lane` profile places an alternating cobblestone-wall, fence, and
+lantern post every 12 blocks. The bundled catalog now contains 21 profiles, including forest, cherry, alpine, royal,
+ancient-tuff, frozen, badlands, volcanic, prismarine, End, and soul-lit themes. Forms must remain outside road lanes
+and are skipped as a whole if any target is occupied, any part intersects any current or later road column, or the
+complete form would exceed the preview limit.
 
 Commit rechecks loaded chunks, exact block snapshots, surface safety, headroom, form space, and protection events
 before applying the whole plan on the server thread. A failed apply is rolled back. Survival builders with
@@ -96,19 +106,21 @@ The deployable JAR is written to `build/libs/Trails-2.2.0.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven
-repositories are restricted to the groups they are expected to serve. CI runs the complete build on Java 21 and Java
-25, while the published classes target Java 21 bytecode.
+repositories are restricted to the groups they are expected to serve. CI and published classes target Java 25.
 
-Released `arc-core` test utilities are resolved anonymously from the public RusCrafting Reposilite repository.
-Trails uses `arc-core-paper-testing` to own MockBukkit's process-global lifecycle consistently while keeping the
-deployable plugin independent of `arc-core`. Production persistence remains in Trails' narrow adapters.
+Released `arc-core` runtime and test artifacts are resolved anonymously from the public RusCrafting Reposilite
+repository. Trails shades and relocates `arc-core-paper` for lifecycle, task ownership, and bounded runtime-health
+diagnostics; tests use `arc-core-paper-testing` to own MockBukkit's process-global lifecycle consistently. Production
+persistence remains in Trails' narrow adapters. Trail block state is decoded once per loaded chunk, served from an
+in-memory index, and coalesced into one bounded binary chunk payload every second, on chunk unload, world save, or
+plugin shutdown.
 
 ## Architecture
 
 - `domain` — trail parsing, selection, progression, decay, speed decisions, and road geometry without Bukkit.
 - `config` — one configuration owner builds complete validated reload candidates from the versioned split files,
   transactional legacy migration, and MiniMessage/legacy localization.
-- `storage` — player preferences, block metadata compatibility, and restart-safe road undo history.
+- `storage` — player preferences, chunk-local trail state, and restart-safe road undo history.
 - `bukkit` — listeners, commands, safe road preview/commit orchestration, and a runtime-task supervisor that atomically
   replaces reloadable schedulers while owning walk-speed restoration and shutdown cleanup.
 - `integration` — generic Bukkit protection events, CoreProtect logging, and PlaceholderAPI.

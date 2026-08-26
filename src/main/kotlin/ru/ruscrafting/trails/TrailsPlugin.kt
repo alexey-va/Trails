@@ -7,6 +7,7 @@ import org.bukkit.Material
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
 import org.bukkit.block.Block
+import org.bukkit.block.BlockFace
 import org.bukkit.block.data.BlockData
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
@@ -15,7 +16,9 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
-import org.bukkit.scheduler.BukkitTask
+import ru.arc.core.BukkitTaskScheduler
+import ru.arc.observability.RuntimeHealthContribution
+import ru.arc.paper.runtime.PaperPluginRuntime
 import ru.ruscrafting.trails.bukkit.RoadManager
 import ru.ruscrafting.trails.bukkit.RoadResult
 import ru.ruscrafting.trails.bukkit.RuntimeTaskSupervisor
@@ -32,7 +35,7 @@ import ru.ruscrafting.trails.integration.CoreProtectObserver
 import ru.ruscrafting.trails.integration.TrailsPlaceholderExpansion
 import ru.ruscrafting.trails.service.BlockChangeObserver
 import ru.ruscrafting.trails.service.TrailService
-import ru.ruscrafting.trails.storage.CustomBlockTrailStore
+import ru.ruscrafting.trails.storage.ChunkPersistentTrailStore
 import ru.ruscrafting.trails.storage.PlayerPreferencesStore
 import ru.ruscrafting.trails.storage.TrailBlockState
 import java.nio.file.Files
@@ -41,22 +44,24 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.ceil
 
 open class TrailsPlugin : JavaPlugin() {
+    @Volatile
     lateinit var settings: TrailsSettings
         private set
     private lateinit var locale: LocaleService
     private lateinit var configuration: TrailsConfiguration
     private lateinit var preferences: PlayerPreferencesStore
-    private lateinit var blockStore: CustomBlockTrailStore
+    private lateinit var blockStore: ChunkPersistentTrailStore
     private lateinit var trailService: TrailService
+    @Volatile
     private lateinit var roadSettings: RoadSettings
     private lateinit var roadManager: RoadManager
     private val bukkitEventProtection by lazy { BukkitEventProtection(server.pluginManager) }
     private var placeholderExpansion: TrailsPlaceholderExpansion? = null
     private val denyMessageCooldown = ConcurrentHashMap.newKeySet<UUID>()
-    private var roadMaintenanceTask: BukkitTask? = null
     private lateinit var runtimeTasks: RuntimeTaskSupervisor
     private lateinit var commandHandler: TrailsCommand
     private var localeCommand: Command? = null
+    private var pluginRuntime: PaperPluginRuntime? = null
     private val toolKindKey by lazy { NamespacedKey(this, "trail_tool_kind") }
 
     override fun onLoad() {
@@ -73,44 +78,71 @@ open class TrailsPlugin : JavaPlugin() {
     }
 
     override fun onEnable() {
-        preferences =
-            PlayerPreferencesStore(dataFolder.toPath()) { error ->
-                logger.severe("Could not save players.yml asynchronously: ${error.message}")
-            }
-        runtimeTasks = RuntimeTaskSupervisor(this, preferences)
-        blockStore = CustomBlockTrailStore(this)
-        val loaded = configuration.load(reload = true)
-        applyRuntime(loaded.settings, loaded.locale)
-        roadSettings = loaded.roads
-        roadManager = RoadManager(this, loaded.roads)
-        roadMaintenanceTask = server.scheduler.runTaskTimer(this, Runnable(roadManager::tick), 5L, 5L)
-        runCatching { Metrics(this, BSTATS_PLUGIN_ID) }
-            .onFailure { logger.warning("bStats could not initialize and will be skipped: ${it.message}") }
-
-        server.pluginManager.registerEvents(TrailsListener(this), this)
-        val command = checkNotNull(getCommand("trails")) { "Command 'trails' is missing from plugin.yml" }
-        commandHandler = TrailsCommand(this)
-        command.setExecutor(commandHandler)
-        command.tabCompleter = commandHandler
-        syncLocaleCommand()
-
-        if (server.pluginManager.isPluginEnabled("PlaceholderAPI")) {
-            placeholderExpansion = TrailsPlaceholderExpansion(this).also { check(it.register()) { "Could not register PlaceholderAPI expansion" } }
+        val lifecycle = PaperPluginRuntime(this, "trails", BukkitTaskScheduler(this)).also {
+            pluginRuntime = it
+            it.start("version" to pluginMeta.version)
         }
-        logger.info("Trails ${pluginMeta.version} enabled with ${settings.definitions.size} trail definitions")
+        try {
+            preferences = lifecycle.own(
+                PlayerPreferencesStore(dataFolder.toPath()) { error ->
+                    logger.severe("Could not save players.yml asynchronously: ${error.message}")
+                },
+            )
+            runtimeTasks = lifecycle.own(RuntimeTaskSupervisor(this, preferences))
+            blockStore = lifecycle.own(ChunkPersistentTrailStore(this))
+            server.pluginManager.registerEvents(blockStore, this)
+            lifecycle.tasks.runTimer(STORAGE_FLUSH_TICKS, STORAGE_FLUSH_TICKS) { blockStore.flushDirty() }
+            val loaded = configuration.load(reload = true)
+            applyRuntime(loaded.settings, loaded.locale)
+            roadSettings = loaded.roads
+            roadManager = RoadManager(this, loaded.roads)
+            lifecycle.own(AutoCloseable { roadManager.close() })
+            lifecycle.tasks.runTimer(5L, 5L, roadManager::tick)
+            runCatching { Metrics(this, BSTATS_PLUGIN_ID) }
+                .onFailure { logger.warning("bStats could not initialize and will be skipped: ${it.message}") }
+
+            server.pluginManager.registerEvents(TrailsListener(this), this)
+            val command = checkNotNull(getCommand("trails")) { "Command 'trails' is missing from plugin.yml" }
+            commandHandler = TrailsCommand(this)
+            command.setExecutor(commandHandler)
+            command.tabCompleter = commandHandler
+            syncLocaleCommand()
+            lifecycle.own(AutoCloseable {
+                localeCommand?.unregister(server.commandMap)
+                localeCommand = null
+            })
+
+            if (server.pluginManager.isPluginEnabled("PlaceholderAPI")) {
+                placeholderExpansion = TrailsPlaceholderExpansion(this).also {
+                    check(it.register()) { "Could not register PlaceholderAPI expansion" }
+                    lifecycle.own(AutoCloseable { it.unregister() })
+                }
+            }
+            lifecycle.registerHealth("runtime") {
+                RuntimeHealthContribution(
+                    schemas = mapOf(
+                        "config" to settings.configVersion,
+                        "trails" to settings.trailsConfigVersion,
+                        "roads" to roadSettings.configVersion,
+                    ),
+                )
+            }
+            lifecycle.registerHealth("storage", blockStore::healthContribution)
+            lifecycle.ready("trails" to settings.definitions.size, "roads" to roadSettings.profiles.size)
+            lifecycle.reportHealthEvery(HEALTH_REPORT_TICKS)
+            logger.info("Trails ${pluginMeta.version} enabled with ${settings.definitions.size} trail definitions")
+        } catch (failure: Throwable) {
+            runCatching { lifecycle.health.markDown(); lifecycle.emitHealth() }
+            logger.severe("Trails failed closed during startup: ${failure.javaClass.simpleName}: ${failure.message}")
+            server.pluginManager.disablePlugin(this)
+        }
     }
 
     override fun onDisable() {
-        if (::runtimeTasks.isInitialized) runtimeTasks.close()
-        if (::roadManager.isInitialized) roadManager.close()
-        roadMaintenanceTask?.cancel()
-        roadMaintenanceTask = null
-        if (::preferences.isInitialized) {
-            runCatching { preferences.close() }.onFailure { logger.severe("Could not save players.yml: ${it.message}") }
-        }
-        placeholderExpansion?.unregister()
+        runCatching { pluginRuntime?.close() }
+            .onFailure { logger.severe("Could not close Trails runtime: ${it.javaClass.simpleName}: ${it.message}") }
+        pluginRuntime = null
         placeholderExpansion = null
-        localeCommand?.unregister(server.commandMap)
         localeCommand = null
     }
 
@@ -162,10 +194,11 @@ open class TrailsPlugin : JavaPlugin() {
             restoreSpeed(player)
             return
         }
+        val movementContext by lazy(LazyThreadSafetyMode.NONE) { trailService.movementContext(block) }
         val canBoost =
             if (settings.usePermissionForBoost) player.hasPermission("trails.boost") else boostEnabled(player.uniqueId)
         if (canBoost) {
-            val multiplier = trailService.speedMultiplier(block, settings.speedBoostOnlyTrails)
+            val multiplier = trailService.speedMultiplier(movementContext, settings.speedBoostOnlyTrails)
             runtimeTasks.targetSpeed(
                 player,
                 multiplier,
@@ -177,11 +210,11 @@ open class TrailsPlugin : JavaPlugin() {
 
         if (!createTrail) return
         if (settings.sneakBypass && player.isSneaking) return
-        if (!trailService.canAffect(block)) return
+        if (!trailService.canAffect(movementContext)) return
         val canCreate =
             if (settings.usePermissionForTrails) player.hasPermission("trails.create-trails") else trailsEnabled(player.uniqueId)
         if (!canCreate) return
-        trailService.walk(player, block, settings.runModifier) { target ->
+        trailService.walk(player, movementContext, settings.runModifier) { target ->
             checkEventProtection(player, block, target)
         }
     }
@@ -262,9 +295,11 @@ open class TrailsPlugin : JavaPlugin() {
     ) = trailService.restoreRoad(actor, block, before, previous)
 
     fun forceTrail(player: Player, block: Block) {
-        if (!settings.worldEnabled(block.world.name) || !trailService.canAffect(block)) return
+        if (!settings.worldEnabled(block.world.name)) return
+        val context = trailService.movementContext(block)
+        if (!trailService.canAffect(context)) return
         val bypass = player.hasPermission("trails.trail-tool.bypass-protection")
-        trailService.walk(player, block, settings.runModifier, forced = true) { target ->
+        trailService.walk(player, context, settings.runModifier, forced = true) { target ->
             bypass || checkEventProtection(player, block, target)
         }
     }
@@ -274,6 +309,11 @@ open class TrailsPlugin : JavaPlugin() {
             trailService.decay(block, settings.stepDecayFraction) { target -> bukkitEventProtection.canDecay(block, target) }
 
     fun clearTrailData(block: Block) = trailService.clear(block)
+
+    fun moveTrailData(
+        blocks: Collection<Block>,
+        direction: BlockFace,
+    ) = trailService.move(blocks, direction)
 
     fun inspectTrail(block: Block): TrailBlockState? = trailService.inspect(block)
 
@@ -524,5 +564,7 @@ open class TrailsPlugin : JavaPlugin() {
 
     private companion object {
         const val BSTATS_PLUGIN_ID = 16930
+        const val HEALTH_REPORT_TICKS = 1_200L
+        const val STORAGE_FLUSH_TICKS = 20L
     }
 }

@@ -39,8 +39,12 @@ repositories {
 dependencies {
     compileOnly(libs.paper.api)
 
-    implementation(libs.custom.block.data)
     implementation(libs.bstats.bukkit)
+    implementation(libs.arc.core.paper) {
+        exclude(group = "net.kyori")
+        exclude(group = "org.slf4j")
+        exclude(group = "org.snakeyaml")
+    }
 
     compileOnly(libs.coreprotect)
     compileOnly(libs.placeholder.api)
@@ -60,13 +64,13 @@ dependencyLocking {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
 }
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_21)
+        jvmTarget.set(JvmTarget.JVM_25)
         freeCompilerArgs.addAll("-jvm-default=enable", "-Xjsr305=strict")
         allWarningsAsErrors.set(true)
     }
@@ -107,8 +111,8 @@ tasks.jacocoTestCoverageVerification {
 tasks.shadowJar {
     archiveClassifier.set("")
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
-    relocate("com.jeff_media.customblockdata", "ru.ruscrafting.trails.lib.customblockdata")
     relocate("org.bstats", "ru.ruscrafting.trails.lib.bstats")
+    relocate("ru.arc", "ru.ruscrafting.trails.lib.arc")
     mergeServiceFiles()
 }
 
@@ -142,11 +146,20 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
                 "THIRD_PARTY_NOTICES.txt",
                 "ru/ruscrafting/trails/TrailsPlugin.class",
                 "ru/ruscrafting/trails/config/YamlConfig.class",
-                "ru/ruscrafting/trails/lib/customblockdata/CustomBlockData.class",
                 "ru/ruscrafting/trails/lib/bstats/bukkit/Metrics.class",
+                "ru/ruscrafting/trails/lib/arc/paper/runtime/PaperPluginRuntime.class",
             )
         check(entries.containsAll(required)) { "Deployable JAR is missing: ${required - entries}" }
         check(entries.none { it.startsWith("org/bukkit/") }) { "Paper API must not be shaded" }
+        check(
+            entries.none {
+                it.startsWith("net/kyori/") ||
+                    it.startsWith("org/slf4j/") ||
+                    it.startsWith("org/snakeyaml/")
+            },
+        ) {
+            "Paper-provided libraries must not be shaded"
+        }
         check(
             entries.none {
                 it.startsWith("org/mockbukkit/") ||
@@ -166,7 +179,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         ) {
             "Optional plugin APIs must not be shaded"
         }
-        check(entries.none { it.startsWith("com/jeff_media/") || it.startsWith("org/bstats/") }) {
+        check(entries.none { it.startsWith("org/bstats/") }) {
             "Runtime libraries must be relocated"
         }
         check(entries.none { it.startsWith("me/ccrama/") }) {
@@ -177,7 +190,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         check("version: \"2.2.0\"" in descriptor)
         val mainClass = zipTree(jar).matching { include("ru/ruscrafting/trails/TrailsPlugin.class") }.singleFile.readBytes()
         val classMajorVersion = ((mainClass[6].toInt() and 0xff) shl 8) or (mainClass[7].toInt() and 0xff)
-        check(classMajorVersion == 65) { "TrailsPlugin.class must target Java 21 (major 65), found $classMajorVersion" }
+        check(classMajorVersion == 69) { "TrailsPlugin.class must target Java 25 (major 69), found $classMajorVersion" }
     }
 }
 

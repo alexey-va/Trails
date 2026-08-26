@@ -15,9 +15,12 @@ data class RoadSettings(
     val maxPlannedBlocks: Int,
     val previewExpirySeconds: Long,
     val surfaceSearchDepth: Int,
+    val maxCrossSlopeBlocks: Int,
     val maxSegmentDistanceBlocks: Int,
     val maxSegmentHeightDifferenceBlocks: Int,
     val captureWhileFlying: Boolean,
+    val smoothingEnabled: Boolean,
+    val smoothingToleranceBlocks: Double,
     val replacementMode: RoadReplacementMode,
     val replaceableMaterials: Set<Material>,
     val protectedMaterials: Set<Material>,
@@ -142,6 +145,8 @@ object RoadSettingsLoader {
         if (expiry !in 10..3600) problems += "limits.preview-expiry-seconds must be between 10 and 3600"
         val depth = versionedInteger(config, "limits.surface-search-depth", if (legacy) 2 else 8, legacy, problems)
         if (depth !in 0..16) problems += "limits.surface-search-depth must be between 0 and 16"
+        val maxCrossSlope = versionedInteger(config, "limits.max-cross-slope-blocks", 1, legacy, problems)
+        if (maxCrossSlope !in 0..4) problems += "limits.max-cross-slope-blocks must be between 0 and 4"
         val maxSegmentDistance =
             versionedInteger(config, "limits.max-segment-distance-blocks", if (legacy) 16 else 48, legacy, problems)
         val maximumSegmentDistance = if (legacy) 64 else 128
@@ -161,6 +166,12 @@ object RoadSettingsLoader {
         }
         val enabled = boolean(config, "enabled", false, problems)
         val captureWhileFlying = if (legacy) false else boolean(config, "movement.capture-while-flying", true, problems)
+        val smoothingEnabled = !legacy && boolean(config, "movement.smoothing.enabled", true, problems)
+        val smoothingTolerance =
+            if (legacy) 0.0 else decimal(config, "movement.smoothing.tolerance-blocks", 1.0, problems)
+        if (!smoothingTolerance.isFinite() || smoothingTolerance !in 0.0..4.0) {
+            problems += "movement.smoothing.tolerance-blocks must be between 0.0 and 4.0"
+        }
 
         val replacementMode = replacementMode(config, legacy, problems)
         val rawReplaceable = config.stringList("replaceable-materials")
@@ -208,9 +219,12 @@ object RoadSettingsLoader {
             maxPlannedBlocks = maxBlocks,
             previewExpirySeconds = expiry.toLong(),
             surfaceSearchDepth = depth,
+            maxCrossSlopeBlocks = maxCrossSlope,
             maxSegmentDistanceBlocks = maxSegmentDistance,
             maxSegmentHeightDifferenceBlocks = maxSegmentHeightDifference,
             captureWhileFlying = captureWhileFlying,
+            smoothingEnabled = smoothingEnabled,
+            smoothingToleranceBlocks = smoothingTolerance,
             replacementMode = replacementMode,
             replaceableMaterials = replaceable,
             protectedMaterials = protected,
@@ -494,6 +508,23 @@ object RoadSettingsLoader {
                 else -> null
             }
         if (value == null) problems += "$path must be a boolean"
+        return value ?: default
+    }
+
+    private fun decimal(
+        config: YamlConfig,
+        path: String,
+        default: Double,
+        problems: MutableList<String>,
+    ): Double {
+        val raw = config.value(path) ?: return default
+        val value =
+            when (raw) {
+                is Number -> raw.toDouble().takeIf(Double::isFinite)
+                is String -> raw.trim().toDoubleOrNull()?.takeIf(Double::isFinite)
+                else -> null
+            }
+        if (value == null) problems += "$path must be a finite number"
         return value ?: default
     }
 
