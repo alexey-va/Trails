@@ -1,7 +1,11 @@
 package ru.ruscrafting.trails
 
 import io.kotest.core.spec.style.FreeSpec
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.floats.shouldBeExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
@@ -15,11 +19,14 @@ import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.block.BlockFadeEvent
 import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.event.player.PlayerMoveEvent
+import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.ruscrafting.trails.bukkit.TrailToolKind
+import ru.ruscrafting.trails.domain.TrailIdentity
 import ru.ruscrafting.trails.integration.TrailsPlaceholderExpansion
 import ru.ruscrafting.trails.storage.TrailBlockState
 import java.nio.file.Files
@@ -60,6 +67,22 @@ class TrailsPluginIntegrationTest :
             plugin.trailsEnabled(target.uniqueId) shouldBe true
         }
 
+        "tab completion exposes only routes allowed for the sender" {
+            val regular = server.addPlayer("RegularCompleter")
+            val admin = server.addPlayer("AdminCompleter").also { it.isOp = true }
+
+            val regularRoutes = server.getCommandTabComplete(regular, "trails ")
+            regularRoutes shouldContain "on"
+            regularRoutes shouldContain "boost"
+            regularRoutes shouldNotContain "reload"
+            regularRoutes shouldNotContain "road"
+
+            val adminRoutes = server.getCommandTabComplete(admin, "trails ")
+            adminRoutes shouldContain "reload"
+            adminRoutes shouldContain "road"
+            server.getCommandTabComplete(admin, "trails road start ") shouldContain "rustic"
+        }
+
         "the legacy PlaceholderAPI value reflects the effective trail toggle" {
             val player = server.addPlayer("PlaceholderUser")
             val expansion = TrailsPlaceholderExpansion(plugin)
@@ -98,6 +121,23 @@ class TrailsPluginIntegrationTest :
             server.scheduler.pendingTasks.count { it.owner == plugin } shouldBe initialTasks
         }
 
+        "reload keeps the active task set when a replacement interval overflows" {
+            val initialTasks = server.scheduler.pendingTasks.count { it.owner == plugin }
+            val configPath = plugin.dataFolder.toPath().resolve("config.yml")
+            Files.writeString(
+                configPath,
+                Files.readString(configPath).replace(
+                    "  player-preferences-save-interval-minutes: 5",
+                    "  player-preferences-save-interval-minutes: ${Long.MAX_VALUE}",
+                ),
+            )
+
+            plugin.reloadTrails().isFailure shouldBe true
+
+            plugin.settings.saveIntervalMinutes shouldBe 5L
+            server.scheduler.pendingTasks.count { it.owner == plugin } shouldBe initialTasks
+        }
+
         "five successful walks advance the default DirtPath and preserve block metadata" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("Walker")
@@ -109,6 +149,64 @@ class TrailsPluginIntegrationTest :
             block.type shouldBe Material.DIRT
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
             plugin.inspectTrail(block)?.walks shouldBe 0
+        }
+
+        "the registered movement listener adapts block changes into trail progress" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("EventWalker")
+            val from = Location(world, 0.5, 65.0, 0.5)
+            val to = Location(world, 1.5, 65.0, 0.5)
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            player.teleport(from)
+
+            repeat(5) {
+                server.pluginManager.callEvent(PlayerMoveEvent(player, from, to))
+            }
+
+            block.type shouldBe Material.DIRT
+            plugin.inspectTrail(block) shouldBe TrailBlockState(TrailIdentity("DirtPath", 1), 0)
+        }
+
+        "the registered movement listener ignores cancelled movement" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("CancelledWalker")
+            val from = Location(world, 0.5, 65.0, 0.5)
+            val to = Location(world, 1.5, 65.0, 0.5)
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            player.teleport(from)
+
+            repeat(5) {
+                server.pluginManager.callEvent(PlayerMoveEvent(player, from, to).also { event -> event.isCancelled = true })
+            }
+
+            block.type shouldBe Material.GRASS_BLOCK
+            plugin.inspectTrail(block) shouldBe null
+        }
+
+        "teleport and plugin shutdown restore managed speed and cancel runtime tasks" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("BoostedWalker")
+            val location = Location(world, 0.5, 65.0, 0.5)
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            player.teleport(location)
+            player.walkSpeed = 0.2F
+            plugin.forceTrail(player, block)
+
+            plugin.handleMovement(player, block, createTrail = false)
+            server.scheduler.performTicks(1)
+            player.walkSpeed shouldNotBe 0.2F
+
+            server.pluginManager.callEvent(PlayerTeleportEvent(player, location, location.clone().add(4.0, 0.0, 0.0)))
+            player.walkSpeed shouldBeExactly 0.2F
+
+            plugin.handleMovement(player, block, createTrail = false)
+            server.scheduler.performTicks(1)
+            player.walkSpeed shouldNotBe 0.2F
+
+            server.pluginManager.disablePlugin(plugin)
+
+            player.walkSpeed shouldBeExactly 0.2F
+            server.scheduler.pendingTasks.none { it.owner == plugin } shouldBe true
         }
 
         "bukkit-event protection fires only for the material transition and respects cancellation" {
@@ -227,6 +325,32 @@ class TrailsPluginIntegrationTest :
             player.addAttachment(plugin, "trails.create-trails", true)
             repeat(5) { plugin.handleMovement(player, block) }
             block.type shouldBe Material.DIRT
+        }
+
+        "permission-gated boost requires trails.boost" {
+            val world = server.addSimpleWorld("world")
+            val player = server.addPlayer("BoostPermissionWalker")
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val configPath = plugin.dataFolder.toPath().resolve("config.yml")
+            Files.writeString(
+                configPath,
+                Files.readString(configPath).replace(
+                    "speed-boost:\n  require-permission: false",
+                    "speed-boost:\n  require-permission: true",
+                ),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+            player.walkSpeed = 0.2F
+            plugin.forceTrail(player, block)
+
+            plugin.handleMovement(player, block, createTrail = false)
+            server.scheduler.performTicks(1)
+            player.walkSpeed shouldBeExactly 0.2F
+
+            player.addAttachment(plugin, "trails.boost", true)
+            plugin.handleMovement(player, block, createTrail = false)
+            server.scheduler.performTicks(1)
+            player.walkSpeed shouldNotBe 0.2F
         }
 
         "the trail tool advances immediately and block breaking clears legacy metadata" {

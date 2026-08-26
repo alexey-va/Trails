@@ -41,4 +41,37 @@ class RoadHistoryStoreTest :
                 folder.toFile().deleteRecursively()
             }
         }
+
+        "preserves decorative road state without a natural trail identity" {
+            val folder = Files.createTempDirectory("trails-decorative-road-history-")
+            try {
+                val player = UUID.randomUUID()
+                val expected =
+                    linkedMapOf(
+                        player to
+                            RoadCommitRecord(
+                                UUID.randomUUID(),
+                                5678L,
+                                listOf(
+                                    RoadBlockRecord(
+                                        4,
+                                        70,
+                                        9,
+                                        "minecraft:grass_block[snowy=false]",
+                                        "minecraft:stone_bricks",
+                                        null,
+                                        TrailBlockState(identity = null, walks = 0),
+                                    ),
+                                ),
+                            ),
+                    )
+                val store = RoadHistoryStore(folder)
+
+                store.save(expected)
+
+                store.load() shouldBe expected
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
     })

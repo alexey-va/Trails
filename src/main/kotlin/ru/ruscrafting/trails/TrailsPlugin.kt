@@ -6,7 +6,6 @@ import org.bstats.bukkit.Metrics
 import org.bukkit.Material
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
-import org.bukkit.Particle
 import org.bukkit.block.Block
 import org.bukkit.block.data.BlockData
 import org.bukkit.command.Command
@@ -17,26 +16,21 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
-import ru.ruscrafting.trails.bukkit.BukkitWalkSpeedTarget
-import ru.ruscrafting.trails.bukkit.DecayScheduler
 import ru.ruscrafting.trails.bukkit.RoadManager
 import ru.ruscrafting.trails.bukkit.RoadResult
+import ru.ruscrafting.trails.bukkit.RuntimeTaskSupervisor
 import ru.ruscrafting.trails.bukkit.TrailsCommand
 import ru.ruscrafting.trails.bukkit.TrailsListener
 import ru.ruscrafting.trails.bukkit.TrailToolKind
 import ru.ruscrafting.trails.config.LocaleService
-import ru.ruscrafting.trails.config.LegacyConfigMigrator
 import ru.ruscrafting.trails.config.RoadSettings
-import ru.ruscrafting.trails.config.RoadSettingsLoader
+import ru.ruscrafting.trails.config.TrailsConfiguration
 import ru.ruscrafting.trails.config.TrailsSettings
-import ru.ruscrafting.trails.config.TrailsSettingsLoader
-import ru.ruscrafting.trails.config.YamlConfig
 import ru.ruscrafting.trails.domain.TrailCatalog
 import ru.ruscrafting.trails.integration.BukkitEventProtection
 import ru.ruscrafting.trails.integration.CoreProtectObserver
 import ru.ruscrafting.trails.integration.TrailsPlaceholderExpansion
 import ru.ruscrafting.trails.service.BlockChangeObserver
-import ru.ruscrafting.trails.service.SpeedController
 import ru.ruscrafting.trails.service.TrailService
 import ru.ruscrafting.trails.storage.CustomBlockTrailStore
 import ru.ruscrafting.trails.storage.PlayerPreferencesStore
@@ -50,9 +44,7 @@ open class TrailsPlugin : JavaPlugin() {
     lateinit var settings: TrailsSettings
         private set
     private lateinit var locale: LocaleService
-    private lateinit var configFile: YamlConfig
-    private lateinit var trailsFile: YamlConfig
-    private lateinit var roadsFile: YamlConfig
+    private lateinit var configuration: TrailsConfiguration
     private lateinit var preferences: PlayerPreferencesStore
     private lateinit var blockStore: CustomBlockTrailStore
     private lateinit var trailService: TrailService
@@ -60,35 +52,24 @@ open class TrailsPlugin : JavaPlugin() {
     private lateinit var roadManager: RoadManager
     private val bukkitEventProtection by lazy { BukkitEventProtection(server.pluginManager) }
     private var placeholderExpansion: TrailsPlaceholderExpansion? = null
-    private val speedController = SpeedController()
     private val denyMessageCooldown = ConcurrentHashMap.newKeySet<UUID>()
-    private var speedTask: BukkitTask? = null
-    private var preferenceSaveTask: BukkitTask? = null
-    private var decayScheduler: DecayScheduler? = null
     private var roadMaintenanceTask: BukkitTask? = null
+    private lateinit var runtimeTasks: RuntimeTaskSupervisor
     private lateinit var commandHandler: TrailsCommand
     private var localeCommand: Command? = null
     private val toolKindKey by lazy { NamespacedKey(this, "trail_tool_kind") }
 
     override fun onLoad() {
         saveDefaultConfig()
-        ensureBundledResources()
-        configFile = YamlConfig(dataFolder.toPath(), "config.yml")
-        val migration =
-            LegacyConfigMigrator(
+        configuration =
+            TrailsConfiguration(
                 dataFolder = dataFolder.toPath(),
-                materialExists = { Material.getMaterial(it) != null },
-                particleExists = { runCatching { Particle.valueOf(it) }.isSuccess },
-            ).migrateIfNeeded(configFile)
-        if (migration.migrated) {
-            logger.info("Migrated config.yml to schema v3; backup: ${migration.backup?.fileName}")
-            configFile.reload()
-        }
-        ensureBundledResource("trails.yml")
-        trailsFile = YamlConfig(dataFolder.toPath(), "trails.yml")
-        ensureBundledResource("roads.yml")
-        roadsFile = YamlConfig(dataFolder.toPath(), "roads.yml")
-        loadLocale(loadSettings(reload = false))
+                ensureBundledResource = ::ensureBundledResource,
+                migrationReporter = { migration ->
+                    logger.info("Migrated config.yml to schema v3; backup: ${migration.backup?.fileName}")
+                },
+            )
+        configuration.load(reload = false)
     }
 
     override fun onEnable() {
@@ -96,13 +77,12 @@ open class TrailsPlugin : JavaPlugin() {
             PlayerPreferencesStore(dataFolder.toPath()) { error ->
                 logger.severe("Could not save players.yml asynchronously: ${error.message}")
             }
+        runtimeTasks = RuntimeTaskSupervisor(this, preferences)
         blockStore = CustomBlockTrailStore(this)
-        val loadedSettings = loadSettings(reload = true)
-        val loadedRoadSettings = loadRoadSettings(reload = true)
-        val loadedLocale = loadLocale(loadedSettings)
-        applyRuntime(loadedSettings, loadedLocale)
-        roadSettings = loadedRoadSettings
-        roadManager = RoadManager(this, loadedRoadSettings)
+        val loaded = configuration.load(reload = true)
+        applyRuntime(loaded.settings, loaded.locale)
+        roadSettings = loaded.roads
+        roadManager = RoadManager(this, loaded.roads)
         roadMaintenanceTask = server.scheduler.runTaskTimer(this, Runnable(roadManager::tick), 5L, 5L)
         runCatching { Metrics(this, BSTATS_PLUGIN_ID) }
             .onFailure { logger.warning("bStats could not initialize and will be skipped: ${it.message}") }
@@ -121,11 +101,10 @@ open class TrailsPlugin : JavaPlugin() {
     }
 
     override fun onDisable() {
-        restoreAllSpeeds()
+        if (::runtimeTasks.isInitialized) runtimeTasks.close()
         if (::roadManager.isInitialized) roadManager.close()
         roadMaintenanceTask?.cancel()
         roadMaintenanceTask = null
-        cancelRuntimeTasks()
         if (::preferences.isInitialized) {
             runCatching { preferences.close() }.onFailure { logger.severe("Could not save players.yml: ${it.message}") }
         }
@@ -137,12 +116,10 @@ open class TrailsPlugin : JavaPlugin() {
 
     fun reloadTrails(): Result<Unit> =
         runCatching {
-            val loadedSettings = loadSettings(reload = true)
-            val loadedRoadSettings = loadRoadSettings(reload = true)
-            val loadedLocale = loadLocale(loadedSettings)
-            applyRuntime(loadedSettings, loadedLocale)
-            roadSettings = loadedRoadSettings
-            roadManager.reconfigure(loadedRoadSettings)
+            val loaded = configuration.load(reload = true)
+            applyRuntime(loaded.settings, loaded.locale)
+            roadSettings = loaded.roads
+            roadManager.reconfigure(loaded.roads)
             if (::commandHandler.isInitialized) syncLocaleCommand()
             logger.info("Trails configuration reloaded")
         }.onFailure { error ->
@@ -151,10 +128,7 @@ open class TrailsPlugin : JavaPlugin() {
 
     fun validateConfiguration(): Result<TrailsSettings> =
         runCatching {
-            val loadedSettings = loadSettings(reload = true)
-            loadRoadSettings(reload = true)
-            loadLocale(loadedSettings)
-            loadedSettings
+            configuration.load(reload = true).settings
         }
 
     fun showStatus(sender: CommandSender) {
@@ -192,8 +166,8 @@ open class TrailsPlugin : JavaPlugin() {
             if (settings.usePermissionForBoost) player.hasPermission("trails.boost") else boostEnabled(player.uniqueId)
         if (canBoost) {
             val multiplier = trailService.speedMultiplier(block, settings.speedBoostOnlyTrails)
-            speedController.target(
-                BukkitWalkSpeedTarget(player),
+            runtimeTasks.targetSpeed(
+                player,
                 multiplier,
                 immediate = multiplier == 1.0 && settings.immediatelyRemoveBoost,
             )
@@ -339,7 +313,7 @@ open class TrailsPlugin : JavaPlugin() {
 
     fun setBoostEnabled(uuid: UUID, enabled: Boolean) = preferences.setBoost(uuid, enabled)
 
-    fun restoreSpeed(player: Player) = speedController.restore(BukkitWalkSpeedTarget(player))
+    fun restoreSpeed(player: Player) = runtimeTasks.restoreSpeed(player)
 
     fun message(
         sender: CommandSender,
@@ -378,31 +352,6 @@ open class TrailsPlugin : JavaPlugin() {
         val online: Player?,
     )
 
-    private fun loadSettings(reload: Boolean): TrailsSettings {
-        if (reload) {
-            configFile.reload()
-            trailsFile.reload()
-        }
-        return TrailsSettingsLoader.load(
-            config = configFile,
-            trails = trailsFile,
-            materialExists = { Material.getMaterial(it) != null },
-            particleExists = { runCatching { Particle.valueOf(it) }.isSuccess },
-        )
-    }
-
-    private fun loadLocale(settings: TrailsSettings): LocaleService =
-        LocaleService.load(
-            dataFolder = dataFolder.toPath(),
-            language = settings.language,
-            commandName = settings.commandAlias ?: "trails",
-        )
-
-    private fun loadRoadSettings(reload: Boolean): RoadSettings {
-        if (reload) roadsFile.reload()
-        return RoadSettingsLoader.load(roadsFile)
-    }
-
     private fun applyRuntime(newSettings: TrailsSettings, newLocale: LocaleService) {
         val newObserver = createObserver(newSettings)
         val newTrailService =
@@ -412,12 +361,14 @@ open class TrailsPlugin : JavaPlugin() {
                 observer = newObserver,
             )
 
-        if (::settings.isInitialized) restoreAllSpeeds()
-        cancelRuntimeTasks()
+        runtimeTasks.reconfigure(
+            settings = newSettings,
+            trailService = newTrailService,
+            canDecay = { block, target -> bukkitEventProtection.canDecay(block, target) },
+        )
         settings = newSettings
         locale = newLocale
         trailService = newTrailService
-        scheduleRuntimeTasks()
     }
 
     private fun createObserver(settings: TrailsSettings): BlockChangeObserver {
@@ -446,49 +397,6 @@ open class TrailsPlugin : JavaPlugin() {
                 .onFailure { logger.warning("$name could not log a Trails block change: ${it.message}") }
         }
 
-    private fun scheduleRuntimeTasks() {
-        speedTask =
-            server.scheduler.runTaskTimer(
-                this,
-                Runnable {
-                    val online = server.onlinePlayers.associate { it.uniqueId to BukkitWalkSpeedTarget(it) }
-                    speedController.tick(online, settings.speedBoostStep.toFloat())
-                },
-                0L,
-                settings.speedBoostInterval,
-            )
-        preferenceSaveTask =
-            server.scheduler.runTaskTimer(
-                this,
-                Runnable { preferences.saveAsync() },
-                settings.saveIntervalMinutes * 60L * 20L,
-                settings.saveIntervalMinutes * 60L * 20L,
-            )
-        if (settings.trailDecay) {
-            decayScheduler =
-                DecayScheduler(
-                    this,
-                    settings,
-                    trailService,
-                    canChange = { block, target -> bukkitEventProtection.canDecay(block, target) },
-                )
-        }
-    }
-
-    private fun cancelRuntimeTasks() {
-        speedTask?.cancel()
-        speedTask = null
-        preferenceSaveTask?.cancel()
-        preferenceSaveTask = null
-        decayScheduler?.close()
-        decayScheduler = null
-    }
-
-    private fun restoreAllSpeeds() {
-        val online = server.onlinePlayers.associate { it.uniqueId to BukkitWalkSpeedTarget(it) }
-        speedController.restoreAll(online)
-    }
-
     private fun checkEventProtection(
         player: Player,
         block: Block,
@@ -515,10 +423,6 @@ open class TrailsPlugin : JavaPlugin() {
             )
         }
         return false
-    }
-
-    private fun ensureBundledResources() {
-        listOf("lang/en-US.yml", "lang/ru-RU.yml", "lang/zh-CN.yml", "players.yml").forEach(::ensureBundledResource)
     }
 
     private fun ensureBundledResource(resource: String) {

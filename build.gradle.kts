@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.1.2"
+version = "2.1.3"
 
 repositories {
     mavenCentral()
@@ -94,7 +94,7 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = BigDecimal("0.60")
+                minimum = BigDecimal("0.80")
             }
         }
     }
@@ -145,6 +145,16 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         check(entries.none { it.startsWith("org/bukkit/") }) { "Paper API must not be shaded" }
         check(
             entries.none {
+                it.startsWith("org/mockbukkit/") ||
+                    it.startsWith("io/kotest/") ||
+                    it.startsWith("io/mockk/") ||
+                    it.startsWith("org/junit/")
+            },
+        ) {
+            "Test frameworks must not be shaded"
+        }
+        check(
+            entries.none {
                 it.startsWith("net/coreprotect/") ||
                     it.startsWith("me/clip/")
             },
@@ -159,7 +169,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         }
         val descriptor = zipTree(jar).matching { include("plugin.yml") }.singleFile.readText()
         check("main: ru.ruscrafting.trails.TrailsPlugin" in descriptor)
-        check("version: \"2.1.2\"" in descriptor)
+        check("version: \"2.1.3\"" in descriptor)
         val mainClass = zipTree(jar).matching { include("ru/ruscrafting/trails/TrailsPlugin.class") }.singleFile.readBytes()
         val classMajorVersion = ((mainClass[6].toInt() and 0xff) shl 8) or (mainClass[7].toInt() and 0xff)
         check(classMajorVersion == 65) { "TrailsPlugin.class must target Java 21 (major 65), found $classMajorVersion" }

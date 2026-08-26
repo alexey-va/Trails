@@ -65,8 +65,9 @@ class RoadHistoryStore(
                                 null
                             }
                         val rawAfterIdentity = raw["after-identity"]?.toString()
-                        if (rawAfterIdentity == null || rawAfterIdentity.length > MAX_IDENTITY_LENGTH) return@mapNotNull null
-                        val afterIdentity = TrailIdentity.parse(rawAfterIdentity) ?: return@mapNotNull null
+                        if (rawAfterIdentity != null && rawAfterIdentity.length > MAX_IDENTITY_LENGTH) return@mapNotNull null
+                        val afterIdentity = TrailIdentity.parse(rawAfterIdentity)
+                        if (rawAfterIdentity != null && afterIdentity == null) return@mapNotNull null
                         val afterState =
                             TrailBlockState(
                                 afterIdentity,

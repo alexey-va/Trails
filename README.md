@@ -72,7 +72,7 @@ only while every road block still exactly matches the committed snapshot, so it 
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.1.2.jar`.
+The deployable JAR is written to `build/libs/Trails-2.1.3.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven
@@ -86,9 +86,11 @@ builds non-reproducible. Trails keeps the required atomic YAML behavior in its o
 ## Architecture
 
 - `domain` — trail parsing, selection, progression, decay, speed decisions, and road geometry without Bukkit.
-- `config` — versioned split configuration, transactional legacy migration, and MiniMessage/legacy localization.
+- `config` — one configuration owner builds complete validated reload candidates from the versioned split files,
+  transactional legacy migration, and MiniMessage/legacy localization.
 - `storage` — player preferences, block metadata compatibility, and restart-safe road undo history.
-- `bukkit` — listeners, commands, schedulers, and safe road preview/commit orchestration.
+- `bukkit` — listeners, commands, safe road preview/commit orchestration, and a runtime-task supervisor that atomically
+  replaces reloadable schedulers while owning walk-speed restoration and shutdown cleanup.
 - `integration` — generic Bukkit protection events, CoreProtect logging, and PlaceholderAPI.
 
 ## License
