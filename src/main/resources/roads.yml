@@ -26,7 +26,8 @@ movement:
     tolerance-blocks: 1.0
 
 clearance:
-  # Clear this many blocks above the graded road surface. Set to 0 to keep vegetation.
+  # Clear this many blocks above the graded road surface. Set to 0 to keep configured vegetation.
+  # Safe replaceable bottom slabs are normalized so they cannot create a false full-block rise.
   height-blocks: 2
   # Only these harmless surface obstructions may be removed automatically.
   materials:

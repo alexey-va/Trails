@@ -96,6 +96,39 @@ class RoadTerrainIntegrationTest :
             }
         }
 
+        "consecutive bottom slabs on flat terrain are cleared instead of raising the road" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("SlabObstacleRoadBuilder").also { it.isOp = true }
+            for (x in -1..4) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            world.getBlockAt(1, 65, 0).type = Material.STONE_SLAB
+            world.getBlockAt(2, 65, 0).type = Material.STONE_SLAB
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            enableRoads(plugin) { it.replace("height-blocks: 2", "height-blocks: 0") }
+
+            plugin.roadStart(admin, "rustic")
+            plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            for (x in 1..2) {
+                for (z in -1..1) {
+                    world.getBlockAt(x, 65, z).type shouldBe Material.AIR
+                    setOf(Material.COARSE_DIRT, Material.ROOTED_DIRT, Material.PODZOL, Material.DIRT_PATH) shouldContain
+                        world.getBlockAt(x, 64, z).type
+                }
+            }
+
+            plugin.roadUndo(admin).message shouldBe "messages.roadUndone"
+            world.getBlockAt(1, 65, 0).type shouldBe Material.STONE_SLAB
+            world.getBlockAt(2, 65, 0).type shouldBe Material.STONE_SLAB
+            for (x in 1..2) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type shouldBe Material.STONE
+            }
+        }
+
         "road commit clears configured surface plants and undo restores them" {
             val world = server.addSimpleWorld("arc_qa_flat")
             val admin = server.addPlayer("ClearRoadBuilder").also { it.isOp = true }
@@ -155,13 +188,18 @@ class RoadTerrainIntegrationTest :
         }
     })
 
-private fun enableRoads(plugin: TrailsPlugin) {
+private fun enableRoads(
+    plugin: TrailsPlugin,
+    customize: (String) -> String = { it },
+) {
     val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
-    Files.writeString(
-        roadsPath,
+    val enabled =
         Files.readString(roadsPath)
             .replace("enabled: false", "enabled: true")
-            .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            .replace("worlds: []", "worlds: [arc_qa_flat]")
+    Files.writeString(
+        roadsPath,
+        customize(enabled),
     )
     plugin.reloadTrails().getOrThrow()
 }

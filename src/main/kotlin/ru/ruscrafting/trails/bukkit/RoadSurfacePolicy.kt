@@ -4,6 +4,7 @@ import org.bukkit.Material
 import org.bukkit.block.Block
 import org.bukkit.block.TileState
 import org.bukkit.block.data.Waterlogged
+import org.bukkit.block.data.type.Slab
 import ru.ruscrafting.trails.config.RoadMaterialSafety
 import ru.ruscrafting.trails.config.RoadReplacementMode
 import ru.ruscrafting.trails.config.RoadSettings
@@ -29,11 +30,19 @@ internal class RoadSurfacePolicy(
     fun canExcavate(block: Block): Boolean = canReplace(block)
 
     fun canClearAbove(block: Block): Boolean =
-        block.type in settings.clearableMaterials &&
-            block.type !in settings.protectedMaterials &&
-            block.state !is TileState &&
-            block.type != Material.WATER &&
-            block.type != Material.LAVA
+        (
+            block.type in settings.clearableMaterials &&
+                block.type !in settings.protectedMaterials &&
+                block.state !is TileState &&
+                block.type != Material.WATER &&
+                block.type != Material.LAVA
+        ) || canClearGradeObstruction(block)
+
+    fun canClearGradeObstruction(block: Block): Boolean {
+        if (!canReplace(block)) return false
+        val data = block.blockData
+        return data is Slab && data.type == Slab.Type.BOTTOM
+    }
 
     fun canRemainAboveRoad(block: Block): Boolean =
         !block.type.isSolid &&
@@ -47,6 +56,7 @@ internal class RoadSurfacePolicy(
         val above = block.getRelative(0, 1, 0)
         val aboveMaterial = above.type
         return aboveMaterial.isAir ||
+            canClearGradeObstruction(above) ||
             (!aboveMaterial.isSolid &&
                 aboveMaterial != Material.WATER &&
                 aboveMaterial != Material.LAVA &&

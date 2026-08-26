@@ -461,6 +461,10 @@ class RoadManager internal constructor(
                 clearance[BlockKey(x, y, z)] = block
             }
         }
+        val gradeObstruction = world.getBlockAt(x, rowGrade + 1, z)
+        if (surfacePolicy.canClearGradeObstruction(gradeObstruction)) {
+            clearance[BlockKey(x, gradeObstruction.y, z)] = gradeObstruction
+        }
         for (offset in 1..settings.clearanceHeightBlocks) {
             val y = rowGrade + offset
             if (y >= world.maxHeight) return null

@@ -79,7 +79,9 @@ excavating only ordinary replaceable terrain. `limits.max-cross-slope-blocks` bo
 profiles from painting detached outer strips on cliffs. An isolated one-row height spike or depression is flattened,
 while sustained rises still receive transitions. `clearance.height-blocks` and the strict `clearance.materials`
 allowlist remove harmless plants and snow from the walking space; preview, protection checks, compensation, rollback,
-and undo cover those removals exactly.
+and undo cover those removals exactly. A replaceable bottom slab sitting on the current terrain grade is also cleared
+instead of being mistaken for a full-block rise; top/double slabs, waterlogged blocks, and protected materials still
+block or establish the road grade normally.
 
 Each lane and height transition accepts either one material or a weighted map whose integer percentages total 100,
 for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. The selection is stable for the lifetime of one preview.
