@@ -130,6 +130,79 @@ patterns:
       - {forward: 0, lateral: 3, vertical: 2, material: OAK_FENCE}
       - {forward: 0, lateral: 3, vertical: 3, material: LANTERN}
 
+  grand_lantern_pairs:
+    every-blocks: 16
+    alternate-sides: false
+    placements:
+      - {forward: 0, lateral: -4, vertical: 1, materials: {STONE_BRICK_WALL: 80, POLISHED_ANDESITE: 20}}
+      - {forward: 0, lateral: -4, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: -4, vertical: 3, material: LANTERN}
+      - {forward: 0, lateral: 4, vertical: 1, materials: {STONE_BRICK_WALL: 80, POLISHED_ANDESITE: 20}}
+      - {forward: 0, lateral: 4, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: 4, vertical: 3, material: LANTERN}
+
+  forest_lantern_pairs:
+    every-blocks: 14
+    alternate-sides: false
+    placements:
+      - {forward: 0, lateral: -4, vertical: 1, materials: {MOSSY_COBBLESTONE_WALL: 75, COBBLESTONE_WALL: 25}}
+      - {forward: 0, lateral: -4, vertical: 2, material: DARK_OAK_FENCE}
+      - {forward: 0, lateral: -4, vertical: 3, material: LANTERN}
+      - {forward: 0, lateral: 4, vertical: 1, materials: {MOSSY_COBBLESTONE_WALL: 75, COBBLESTONE_WALL: 25}}
+      - {forward: 0, lateral: 4, vertical: 2, material: DARK_OAK_FENCE}
+      - {forward: 0, lateral: 4, vertical: 3, material: LANTERN}
+
+  harbor_beacons:
+    every-blocks: 12
+    alternate-sides: false
+    placements:
+      - {forward: 0, lateral: -4, vertical: 1, material: DARK_PRISMARINE}
+      - {forward: 0, lateral: -4, vertical: 2, material: SEA_LANTERN}
+      - {forward: 0, lateral: 4, vertical: 1, material: DARK_PRISMARINE}
+      - {forward: 0, lateral: 4, vertical: 2, material: SEA_LANTERN}
+
+  desert_lantern_pairs:
+    every-blocks: 16
+    alternate-sides: false
+    placements:
+      - {forward: 0, lateral: -4, vertical: 1, materials: {SANDSTONE: 75, CUT_SANDSTONE: 25}}
+      - {forward: 0, lateral: -4, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: -4, vertical: 3, material: LANTERN}
+      - {forward: 0, lateral: 4, vertical: 1, materials: {SANDSTONE: 75, CUT_SANDSTONE: 25}}
+      - {forward: 0, lateral: 4, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: 4, vertical: 3, material: LANTERN}
+
+  soul_lantern_pairs:
+    every-blocks: 16
+    alternate-sides: false
+    placements:
+      - {forward: 0, lateral: -4, vertical: 1, materials: {BLACKSTONE_WALL: 75, POLISHED_BLACKSTONE_WALL: 25}}
+      - {forward: 0, lateral: -4, vertical: 2, material: DARK_OAK_FENCE}
+      - {forward: 0, lateral: -4, vertical: 3, material: SOUL_LANTERN}
+      - {forward: 0, lateral: 4, vertical: 1, materials: {BLACKSTONE_WALL: 75, POLISHED_BLACKSTONE_WALL: 25}}
+      - {forward: 0, lateral: 4, vertical: 2, material: DARK_OAK_FENCE}
+      - {forward: 0, lateral: 4, vertical: 3, material: SOUL_LANTERN}
+
+  ice_beacons:
+    every-blocks: 14
+    alternate-sides: false
+    placements:
+      - {forward: 0, lateral: -4, vertical: 1, material: PACKED_ICE}
+      - {forward: 0, lateral: -4, vertical: 2, material: SEA_LANTERN}
+      - {forward: 0, lateral: 4, vertical: 1, material: PACKED_ICE}
+      - {forward: 0, lateral: 4, vertical: 2, material: SEA_LANTERN}
+
+  tuff_lantern_pairs:
+    every-blocks: 16
+    alternate-sides: false
+    placements:
+      - {forward: 0, lateral: -4, vertical: 1, material: TUFF_BRICK_WALL}
+      - {forward: 0, lateral: -4, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: -4, vertical: 3, material: LANTERN}
+      - {forward: 0, lateral: 4, vertical: 1, material: TUFF_BRICK_WALL}
+      - {forward: 0, lateral: 4, vertical: 2, material: OAK_FENCE}
+      - {forward: 0, lateral: 4, vertical: 3, material: LANTERN}
+
 profiles:
   footpath:
     lanes: [DIRT_PATH]
@@ -288,3 +361,99 @@ profiles:
       - {SOUL_SOIL: 55, SOUL_SAND: 25, BLACKSTONE: 20}
     height-transition-materials: {BLACKSTONE_STAIRS: 70, POLISHED_BLACKSTONE_BRICK_STAIRS: 30}
     patterns: [soul_lantern_posts]
+
+  royal-big:
+    lanes:
+      - {POLISHED_ANDESITE: 60, STONE_BRICKS: 25, MOSSY_STONE_BRICKS: 15}
+      - {STONE_BRICKS: 70, POLISHED_ANDESITE: 20, MOSSY_STONE_BRICKS: 10}
+      - {SMOOTH_STONE: 60, STONE_BRICKS: 40}
+      - {CHISELED_STONE_BRICKS: 60, POLISHED_DIORITE: 30, SEA_LANTERN: 10}
+      - {SMOOTH_STONE: 60, STONE_BRICKS: 40}
+      - {STONE_BRICKS: 70, POLISHED_ANDESITE: 20, MOSSY_STONE_BRICKS: 10}
+      - {POLISHED_ANDESITE: 60, STONE_BRICKS: 25, MOSSY_STONE_BRICKS: 15}
+    height-transition-materials: {STONE_BRICK_STAIRS: 70, POLISHED_ANDESITE_STAIRS: 30}
+    patterns: [grand_lantern_pairs]
+
+  forest-big:
+    lanes:
+      - {MOSS_BLOCK: 60, PODZOL: 25, MOSSY_COBBLESTONE: 15}
+      - {PODZOL: 50, ROOTED_DIRT: 30, MOSS_BLOCK: 20}
+      - {DIRT_PATH: 65, COARSE_DIRT: 20, ROOTED_DIRT: 15}
+      - {STRIPPED_OAK_WOOD: 50, DIRT_PATH: 35, MOSS_BLOCK: 15}
+      - {DIRT_PATH: 65, COARSE_DIRT: 20, ROOTED_DIRT: 15}
+      - {PODZOL: 50, ROOTED_DIRT: 30, MOSS_BLOCK: 20}
+      - {MOSS_BLOCK: 60, PODZOL: 25, MOSSY_COBBLESTONE: 15}
+    height-transition-materials: {MOSSY_COBBLESTONE_STAIRS: 50, OAK_STAIRS: 50}
+    patterns: [forest_lantern_pairs]
+
+  harbor-big:
+    lanes:
+      - {DARK_OAK_PLANKS: 60, SPRUCE_PLANKS: 40}
+      - {SPRUCE_PLANKS: 60, OAK_PLANKS: 40}
+      - {OAK_PLANKS: 60, SPRUCE_PLANKS: 40}
+      - {STRIPPED_SPRUCE_WOOD: 60, STRIPPED_OAK_WOOD: 30, SEA_LANTERN: 10}
+      - {OAK_PLANKS: 60, SPRUCE_PLANKS: 40}
+      - {SPRUCE_PLANKS: 60, OAK_PLANKS: 40}
+      - {DARK_OAK_PLANKS: 60, SPRUCE_PLANKS: 40}
+    height-transition-materials: {SPRUCE_STAIRS: 60, OAK_STAIRS: 40}
+    patterns: [harbor_beacons]
+
+  sandstone-big:
+    lanes:
+      - {SANDSTONE: 60, CUT_SANDSTONE: 30, SMOOTH_SANDSTONE: 10}
+      - {CUT_SANDSTONE: 60, SMOOTH_SANDSTONE: 40}
+      - {SMOOTH_SANDSTONE: 70, CUT_SANDSTONE: 30}
+      - {CHISELED_SANDSTONE: 70, SMOOTH_SANDSTONE: 30}
+      - {SMOOTH_SANDSTONE: 70, CUT_SANDSTONE: 30}
+      - {CUT_SANDSTONE: 60, SMOOTH_SANDSTONE: 40}
+      - {SANDSTONE: 60, CUT_SANDSTONE: 30, SMOOTH_SANDSTONE: 10}
+    height-transition-materials: {SANDSTONE_STAIRS: 60, SMOOTH_SANDSTONE_STAIRS: 40}
+    patterns: [desert_lantern_pairs]
+
+  nether-big:
+    lanes:
+      - {BASALT: 50, BLACKSTONE: 40, MAGMA_BLOCK: 10}
+      - {BLACKSTONE: 60, POLISHED_BLACKSTONE: 30, GILDED_BLACKSTONE: 10}
+      - {POLISHED_BLACKSTONE_BRICKS: 70, CRACKED_POLISHED_BLACKSTONE_BRICKS: 30}
+      - {CHISELED_POLISHED_BLACKSTONE: 60, GILDED_BLACKSTONE: 30, MAGMA_BLOCK: 10}
+      - {POLISHED_BLACKSTONE_BRICKS: 70, CRACKED_POLISHED_BLACKSTONE_BRICKS: 30}
+      - {BLACKSTONE: 60, POLISHED_BLACKSTONE: 30, GILDED_BLACKSTONE: 10}
+      - {BASALT: 50, BLACKSTONE: 40, MAGMA_BLOCK: 10}
+    height-transition-materials: {BLACKSTONE_STAIRS: 50, POLISHED_BLACKSTONE_BRICK_STAIRS: 50}
+    patterns: [soul_lantern_pairs]
+
+  frozen-big:
+    lanes:
+      - {SNOW_BLOCK: 50, CALCITE: 40, PACKED_ICE: 10}
+      - {PACKED_ICE: 45, SNOW_BLOCK: 35, CALCITE: 20}
+      - {CALCITE: 50, PACKED_ICE: 40, BLUE_ICE: 10}
+      - {PACKED_ICE: 50, SNOW_BLOCK: 20, BLUE_ICE: 20, SEA_LANTERN: 10}
+      - {CALCITE: 50, PACKED_ICE: 40, BLUE_ICE: 10}
+      - {PACKED_ICE: 45, SNOW_BLOCK: 35, CALCITE: 20}
+      - {SNOW_BLOCK: 50, CALCITE: 40, PACKED_ICE: 10}
+    height-transition-materials: {QUARTZ_STAIRS: 60, SMOOTH_QUARTZ_STAIRS: 40}
+    patterns: [ice_beacons]
+
+  prismarine-big:
+    lanes:
+      - {PRISMARINE: 60, DARK_PRISMARINE: 30, SEA_LANTERN: 10}
+      - {DARK_PRISMARINE: 60, PRISMARINE_BRICKS: 40}
+      - {PRISMARINE_BRICKS: 65, PRISMARINE: 25, SEA_LANTERN: 10}
+      - {DARK_PRISMARINE: 50, SEA_LANTERN: 30, PRISMARINE_BRICKS: 20}
+      - {PRISMARINE_BRICKS: 65, PRISMARINE: 25, SEA_LANTERN: 10}
+      - {DARK_PRISMARINE: 60, PRISMARINE_BRICKS: 40}
+      - {PRISMARINE: 60, DARK_PRISMARINE: 30, SEA_LANTERN: 10}
+    height-transition-materials: {PRISMARINE_STAIRS: 50, PRISMARINE_BRICK_STAIRS: 30, DARK_PRISMARINE_STAIRS: 20}
+    patterns: [harbor_beacons]
+
+  tuff-big:
+    lanes:
+      - {TUFF: 60, POLISHED_TUFF: 40}
+      - {POLISHED_TUFF: 60, TUFF_BRICKS: 40}
+      - {TUFF_BRICKS: 60, POLISHED_TUFF: 30, CHISELED_TUFF_BRICKS: 10}
+      - {CHISELED_TUFF_BRICKS: 70, POLISHED_TUFF: 30}
+      - {TUFF_BRICKS: 60, POLISHED_TUFF: 30, CHISELED_TUFF_BRICKS: 10}
+      - {POLISHED_TUFF: 60, TUFF_BRICKS: 40}
+      - {TUFF: 60, POLISHED_TUFF: 40}
+    height-transition-materials: {TUFF_BRICK_STAIRS: 60, POLISHED_TUFF_STAIRS: 40}
+    patterns: [tuff_lantern_pairs]

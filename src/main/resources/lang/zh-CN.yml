@@ -93,6 +93,14 @@ roadProfiles:
   prismarine_causeway: '<yellow>prismarine_causeway <dark_gray>— <gray>海晶石 + 海晶灯。'
   ender_way: '<yellow>ender_way <dark_gray>— <gray>末地石、末地砖和紫珀。'
   soul_lane: '<yellow>soul_lane <dark_gray>— <gray>灵魂土 + 灵魂灯 / 16 格。'
+  royal-big: '<yellow>royal-big <dark_gray>— <gray>礼仪石制大道 + 成对灯柱；宽 7。'
+  forest-big: '<yellow>forest-big <dark_gray>— <gray>苔藓林荫大道 + 灯柱；宽 7。'
+  harbor-big: '<yellow>harbor-big <dark_gray>— <gray>木制港口步道 + 发光航标；宽 7。'
+  sandstone-big: '<yellow>sandstone-big <dark_gray>— <gray>雕纹砂岩大道 + 灯柱；宽 7。'
+  nether-big: '<yellow>nether-big <dark_gray>— <gray>黑石堡垒大道 + 灵魂灯；宽 7。'
+  frozen-big: '<yellow>frozen-big <dark_gray>— <gray>冰与方解石大道 + 航标；宽 7。'
+  prismarine-big: '<yellow>prismarine-big <dark_gray>— <gray>发光海晶石广场大道；宽 7。'
+  tuff-big: '<yellow>tuff-big <dark_gray>— <gray>雕纹凝灰岩大道 + 成对灯柱；宽 7。'
 tools:
   advance:
     label: '路径推进工具'

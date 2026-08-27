@@ -97,8 +97,9 @@ higher end. A height transition is emitted only when the centerline changes heig
 which prevents isolated side slopes from producing sideways stair tangles. Periodic forms are reusable rotated
 structures with forward, lateral, and vertical offsets. Their interval, side alternation, placements, and weighted
 materials are configurable. The bundled `lantern_lane` profile places an alternating cobblestone-wall, fence, and
-lantern post every 12 blocks. The bundled catalog now contains 21 profiles, including forest, cherry, alpine, royal,
-ancient-tuff, frozen, badlands, volcanic, prismarine, End, and soul-lit themes. Forms must remain outside road lanes
+lantern post every 12 blocks. The bundled catalog now contains 29 profiles. Eight `-big` profiles are seven blocks
+wide and add paired lanterns or beacons to royal, forest, harbor, sandstone, Nether, frozen, prismarine, and tuff
+themes. Forms must remain outside road lanes
 and are skipped as a whole if any target is occupied, any part intersects any current or later road column, or the
 complete form would exceed the preview limit.
 
@@ -117,7 +118,7 @@ while every road block still exactly matches the committed snapshot, so it canno
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.2.2.jar`.
+The deployable JAR is written to `build/libs/Trails-2.2.3.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

@@ -34,6 +34,33 @@ class RoadSettingsLoaderTest :
             }
         }
 
+        "bundled catalog keeps big roads seven blocks wide and decorated" {
+            val folder = Files.createTempDirectory("trails-roads-big-")
+            try {
+                val settings = RoadSettingsLoader.load(YamlConfig(folder, "roads.yml"))
+                val expected =
+                    setOf(
+                        "royal-big",
+                        "forest-big",
+                        "harbor-big",
+                        "sandstone-big",
+                        "nether-big",
+                        "frozen-big",
+                        "prismarine-big",
+                        "tuff-big",
+                    )
+
+                settings.profiles.keys.filter { it.endsWith("-big") }.toSet() shouldBe expected
+                expected.forEach { profileName ->
+                    val profile = settings.profiles.getValue(profileName)
+                    profile.lanePalettes.size shouldBe 7
+                    profile.decorationPatterns.isNotEmpty() shouldBe true
+                }
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
+
         "legacy roads use v1 defaults and do not inherit bundled v2 profiles" {
             val folder = Files.createTempDirectory("trails-roads-v1-defaults-")
             try {

@@ -93,6 +93,14 @@ roadProfiles:
   prismarine_causeway: '<yellow>prismarine_causeway <dark_gray>— <gray>призмарин + морские фонари.'
   ender_way: '<yellow>ender_way <dark_gray>— <gray>эндерняк, кирпич Края и пурпур.'
   soul_lane: '<yellow>soul_lane <dark_gray>— <gray>песок душ + синие фонари / 16 блоков.'
+  royal-big: '<yellow>royal-big <dark_gray>— <gray>парадная дорога с фонарями; 7 блоков.'
+  forest-big: '<yellow>forest-big <dark_gray>— <gray>лесная дорога с фонарями; 7 блоков.'
+  harbor-big: '<yellow>harbor-big <dark_gray>— <gray>портовый настил с маяками; 7 блоков.'
+  sandstone-big: '<yellow>sandstone-big <dark_gray>— <gray>резная дорога с фонарями; 7 блоков.'
+  nether-big: '<yellow>nether-big <dark_gray>— <gray>чернит и синие фонари; 7 блоков.'
+  frozen-big: '<yellow>frozen-big <dark_gray>— <gray>лёд и кальцит с маяками; 7 блоков.'
+  prismarine-big: '<yellow>prismarine-big <dark_gray>— <gray>призмарин с подсветкой; 7 блоков.'
+  tuff-big: '<yellow>tuff-big <dark_gray>— <gray>туфовая магистраль с фонарями; 7 блоков.'
 tools:
   advance:
     label: 'прокладчик троп'

@@ -4,12 +4,14 @@ import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.shouldBe
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.nio.file.Files
 
 class LocaleParityTest :
     FreeSpec({
         "Russian and English player messages have identical keys" {
             val folder = Files.createTempDirectory("trails-locales-")
+            val runtime = MockBukkitTestRuntime.open()
             try {
                 val english = YamlConfig(folder, "lang/en-US.yml")
                 val russian = YamlConfig(folder, "lang/ru-RU.yml")
@@ -28,6 +30,7 @@ class LocaleParityTest :
                 locale.formatName shouldBe "minimessage"
                 locale.renderLegacy("messages.toggledOnOther", mapOf("%name%" to "<red>Игрок")) shouldContain "<red>Игрок"
             } finally {
+                runtime.close()
                 folder.toFile().deleteRecursively()
             }
         }

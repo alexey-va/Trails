@@ -93,6 +93,14 @@ roadProfiles:
   prismarine_causeway: '<yellow>prismarine_causeway <dark_gray>— <gray>prismarine + sea lanterns.'
   ender_way: '<yellow>ender_way <dark_gray>— <gray>end stone, End brick, and purpur.'
   soul_lane: '<yellow>soul_lane <dark_gray>— <gray>soul soil + blue lanterns / 16 blocks.'
+  royal-big: '<yellow>royal-big <dark_gray>— <gray>stone avenue + lanterns; 7 wide.'
+  forest-big: '<yellow>forest-big <dark_gray>— <gray>moss road + lanterns; 7 wide.'
+  harbor-big: '<yellow>harbor-big <dark_gray>— <gray>timber deck + beacons; 7 wide.'
+  sandstone-big: '<yellow>sandstone-big <dark_gray>— <gray>carved sandstone + lanterns; 7 wide.'
+  nether-big: '<yellow>nether-big <dark_gray>— <gray>blackstone + soul lanterns; 7 wide.'
+  frozen-big: '<yellow>frozen-big <dark_gray>— <gray>ice + calcite + beacons; 7 wide.'
+  prismarine-big: '<yellow>prismarine-big <dark_gray>— <gray>prismarine + beacons; 7 wide.'
+  tuff-big: '<yellow>tuff-big <dark_gray>— <gray>carved tuff + lanterns; 7 wide.'
 tools:
   advance:
     label: 'trail advancer'
