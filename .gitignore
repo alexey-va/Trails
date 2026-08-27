@@ -15,5 +15,6 @@ buildNumber.properties
 
 .idea/
 .gradle/
+.kotlin/
 build/
 out/
