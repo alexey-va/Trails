@@ -1,11 +1,10 @@
 package ru.ruscrafting.trails.storage
 
 import org.bukkit.configuration.file.YamlConfiguration
+import ru.arc.persistence.AtomicFileStore
 import ru.ruscrafting.trails.domain.TrailIdentity
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 data class RoadBlockRecord(
@@ -25,13 +24,25 @@ data class RoadCommitRecord(
 )
 
 class RoadHistoryStore(
-    private val dataFolder: Path,
+    dataFolder: Path,
 ) {
-    private val path = dataFolder.resolve("road-history.yml")
+    private val store =
+        AtomicFileStore(
+            root = dataFolder,
+            relativePath = Path.of("road-history.yml"),
+            maxBytes = MAX_FILE_BYTES,
+            encode = { value: String -> value.toByteArray(StandardCharsets.UTF_8) },
+            decode = { bytes -> bytes.toString(StandardCharsets.UTF_8) },
+            validate = { encoded -> decode(encoded) },
+        )
 
     fun load(): LinkedHashMap<UUID, RoadCommitRecord> {
-        if (!Files.exists(path)) return linkedMapOf()
-        val yaml = YamlConfiguration.loadConfiguration(path.toFile())
+        val encoded = store.loadOrNull() ?: return linkedMapOf()
+        return decode(encoded)
+    }
+
+    private fun decode(encoded: String): LinkedHashMap<UUID, RoadCommitRecord> {
+        val yaml = YamlConfiguration().apply { loadFromString(encoded) }
         val configVersion = yaml.getInt("config-version")
         require(configVersion in 1..CONFIG_VERSION) { "Unsupported road-history.yml config-version" }
         val historyKeys = yaml.getConfigurationSection("history")?.getKeys(false).orEmpty()
@@ -87,6 +98,12 @@ class RoadHistoryStore(
     }
 
     fun save(history: Map<UUID, RoadCommitRecord>) {
+        validate(history)
+        val yaml = encode(history)
+        store.write(yaml)
+    }
+
+    private fun validate(history: Map<UUID, RoadCommitRecord>) {
         require(history.size <= MAX_STORED_PLAYERS) { "Road undo history exceeds $MAX_STORED_PLAYERS players" }
         history.values.forEach { commit ->
             require(commit.blocks.size in 1..MAX_BLOCKS_PER_COMMIT) { "Road undo commit has an invalid block count" }
@@ -96,6 +113,9 @@ class RoadHistoryStore(
                 }
             }
         }
+    }
+
+    private fun encode(history: Map<UUID, RoadCommitRecord>): String {
         val yaml = YamlConfiguration()
         yaml.set("config-version", CONFIG_VERSION)
         history.forEach { (uuid, commit) ->
@@ -122,18 +142,7 @@ class RoadHistoryStore(
                 },
             )
         }
-        Files.createDirectories(dataFolder)
-        val temporary = Files.createTempFile(dataFolder, ".road-history-", ".tmp")
-        try {
-            Files.writeString(temporary, yaml.saveToString(), StandardCharsets.UTF_8)
-            try {
-                Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-                Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING)
-            }
-        } finally {
-            Files.deleteIfExists(temporary)
-        }
+        return yaml.saveToString()
     }
 
     private companion object {
@@ -142,5 +151,6 @@ class RoadHistoryStore(
         const val MAX_BLOCKS_PER_COMMIT = 4096
         const val MAX_BLOCK_DATA_LENGTH = 1024
         const val MAX_IDENTITY_LENGTH = 256
+        const val MAX_FILE_BYTES = 128L * 1024L * 1024L
     }
 }

@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.2.4"
+version = "2.2.5"
 
 repositories {
     mavenCentral()
@@ -111,6 +111,9 @@ tasks.jacocoTestCoverageVerification {
 tasks.shadowJar {
     archiveClassifier.set("")
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    filesMatching("META-INF/LICENSE-arc-core.txt") {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
     relocate("org.bstats", "ru.ruscrafting.trails.lib.bstats")
     relocate("ru.arc", "ru.ruscrafting.trails.lib.arc")
     mergeServiceFiles()
@@ -144,6 +147,9 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
                 "lang/ru-RU.yml",
                 "lang/zh-CN.yml",
                 "THIRD_PARTY_NOTICES.txt",
+                "META-INF/licenses/Apache-2.0.txt",
+                "META-INF/licenses/bStats-MIT.txt",
+                "META-INF/licenses/Trails-UNLICENSE.txt",
                 "ru/ruscrafting/trails/TrailsPlugin.class",
                 "ru/ruscrafting/trails/config/YamlConfig.class",
                 "ru/ruscrafting/trails/lib/bstats/bukkit/Metrics.class",
@@ -187,7 +193,30 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         }
         val descriptor = zipTree(jar).matching { include("plugin.yml") }.singleFile.readText()
         check("main: ru.ruscrafting.trails.TrailsPlugin" in descriptor)
-        check("version: \"2.2.4\"" in descriptor)
+        check("version: \"2.2.5\"" in descriptor)
+        val notices = zipTree(jar).matching { include("THIRD_PARTY_NOTICES.txt") }.singleFile.readText()
+        listOf("Kotlin standard library 2.4.10", "JetBrains Java annotations 13.0", "arc-core and arc-core-paper 2.0.2", "bStats base and Bukkit 3.2.1")
+            .forEach { dependency -> check(dependency in notices) { "THIRD_PARTY_NOTICES is missing $dependency" } }
+        val shadedRuntimeVersions =
+            configurations.runtimeClasspath.get().resolvedConfiguration.resolvedArtifacts.associate { artifact ->
+                "${artifact.moduleVersion.id.group}:${artifact.name}" to artifact.moduleVersion.id.version
+            }
+        mapOf(
+            "org.jetbrains.kotlin:kotlin-stdlib" to "2.4.10",
+            "org.jetbrains:annotations" to "13.0",
+            "org.bstats:bstats-base" to "3.2.1",
+            "org.bstats:bstats-bukkit" to "3.2.1",
+            "ru.ruscrafting.arc:arc-core" to "2.0.2",
+            "ru.ruscrafting.arc:arc-core-paper" to "2.0.2",
+        ).forEach { (module, expectedVersion) ->
+            check(shadedRuntimeVersions[module] == expectedVersion) {
+                "Shaded runtime inventory mismatch for $module: expected $expectedVersion, found ${shadedRuntimeVersions[module]}"
+            }
+        }
+        val apacheLicense = zipTree(jar).matching { include("META-INF/licenses/Apache-2.0.txt") }.singleFile.readText()
+        check("Apache License" in apacheLicense && "Version 2.0, January 2004" in apacheLicense)
+        val bstatsLicense = zipTree(jar).matching { include("META-INF/licenses/bStats-MIT.txt") }.singleFile.readText()
+        check("Copyright (c) 2021 Bastian Oppermann" in bstatsLicense && "Permission is hereby granted" in bstatsLicense)
         val mainClass = zipTree(jar).matching { include("ru/ruscrafting/trails/TrailsPlugin.class") }.singleFile.readBytes()
         val classMajorVersion = ((mainClass[6].toInt() and 0xff) shl 8) or (mainClass[7].toInt() and 0xff)
         check(classMajorVersion == 69) { "TrailsPlugin.class must target Java 25 (major 69), found $classMajorVersion" }

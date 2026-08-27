@@ -15,6 +15,7 @@ import org.bukkit.NamespacedKey
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.type.Slab
 import org.bukkit.block.data.type.Stairs
+import org.bukkit.event.Event
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
@@ -476,7 +477,7 @@ class TrailsPluginIntegrationTest :
             admin.isOp = true
             val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
 
-            server.pluginManager.callEvent(
+            val ordinaryInteraction =
                 PlayerInteractEvent(
                     admin,
                     Action.RIGHT_CLICK_BLOCK,
@@ -484,13 +485,14 @@ class TrailsPluginIntegrationTest :
                     block,
                     BlockFace.UP,
                     EquipmentSlot.HAND,
-                ),
-            )
+                )
+            server.pluginManager.callEvent(ordinaryInteraction)
+            ordinaryInteraction.useInteractedBlock() shouldNotBe Event.Result.DENY
             plugin.inspectTrail(block) shouldBe null
 
             server.dispatchCommand(admin, "trails give advance") shouldBe true
             val tagged = admin.inventory.contents.filterNotNull().single { plugin.toolKind(it) == TrailToolKind.ADVANCE }
-            server.pluginManager.callEvent(
+            val advanceInteraction =
                 PlayerInteractEvent(
                     admin,
                     Action.RIGHT_CLICK_BLOCK,
@@ -498,11 +500,28 @@ class TrailsPluginIntegrationTest :
                     block,
                     BlockFace.UP,
                     EquipmentSlot.HAND,
-                ),
-            )
+                )
+            server.pluginManager.callEvent(advanceInteraction)
 
+            advanceInteraction.useInteractedBlock() shouldBe Event.Result.DENY
+            advanceInteraction.useItemInHand() shouldBe Event.Result.DENY
             block.type shouldBe Material.DIRT
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
+
+            server.dispatchCommand(admin, "trails give inspect") shouldBe true
+            val inspection = admin.inventory.contents.filterNotNull().single { plugin.toolKind(it) == TrailToolKind.INSPECT }
+            val inspectInteraction =
+                PlayerInteractEvent(
+                    admin,
+                    Action.RIGHT_CLICK_BLOCK,
+                    inspection,
+                    block,
+                    BlockFace.UP,
+                    EquipmentSlot.HAND,
+                )
+            server.pluginManager.callEvent(inspectInteraction)
+            inspectInteraction.useInteractedBlock() shouldBe Event.Result.DENY
+            inspectInteraction.useItemInHand() shouldBe Event.Result.DENY
         }
 
         "give command requires permission and can target an online player" {
@@ -880,7 +899,7 @@ class TrailsPluginIntegrationTest :
             val admin = server.addPlayer("LanternRoadBuilder")
             admin.isOp = true
             for (x in -1..24) {
-                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+                for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.STONE
             }
             world.loadChunk(0, 0)
             world.loadChunk(1, 0)
@@ -912,7 +931,7 @@ class TrailsPluginIntegrationTest :
             val world = server.addSimpleWorld("arc_qa_flat")
             val admin = server.addPlayer("RotatedLanternRoadBuilder")
             admin.isOp = true
-            for (x in -1..1) {
+            for (x in -2..2) {
                 for (z in 0..12) world.getBlockAt(x, 64, z).type = Material.STONE
             }
             world.loadChunk(0, 0)
@@ -941,7 +960,7 @@ class TrailsPluginIntegrationTest :
             val admin = server.addPlayer("BlockedLanternRoadBuilder")
             admin.isOp = true
             for (x in -1..12) {
-                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+                for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.STONE
             }
             world.loadChunk(0, 0)
             admin.teleport(Location(world, 0.5, 65.0, 0.5))
@@ -960,6 +979,34 @@ class TrailsPluginIntegrationTest :
             plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(12, 65, 2).type shouldBe Material.CHEST
+            world.getBlockAt(12, 66, 2).type shouldBe Material.AIR
+            world.getBlockAt(12, 67, 2).type shouldBe Material.AIR
+        }
+
+        "periodic road forms do not float over an unsupported cliff edge" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("UnsupportedLanternRoadBuilder")
+            admin.isOp = true
+            for (x in -1..12) {
+                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+            }
+            world.loadChunk(0, 0)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            val roadsPath = plugin.dataFolder.toPath().resolve("roads.yml")
+            Files.writeString(
+                roadsPath,
+                Files.readString(roadsPath)
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [arc_qa_flat]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            plugin.roadStart(admin, "lantern_lane")
+            plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 0.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            world.getBlockAt(12, 64, 2).type shouldBe Material.AIR
+            world.getBlockAt(12, 65, 2).type shouldBe Material.AIR
             world.getBlockAt(12, 66, 2).type shouldBe Material.AIR
             world.getBlockAt(12, 67, 2).type shouldBe Material.AIR
         }
@@ -998,7 +1045,7 @@ class TrailsPluginIntegrationTest :
             val admin = server.addPlayer("CappedLanternRoadBuilder")
             admin.isOp = true
             for (x in -1..12) {
-                for (z in -1..1) world.getBlockAt(x, 64, z).type = Material.STONE
+                for (z in -2..2) world.getBlockAt(x, 64, z).type = Material.STONE
             }
             world.loadChunk(0, 0)
             world.loadChunk(0, -1)

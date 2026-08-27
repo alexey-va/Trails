@@ -2,6 +2,7 @@ package ru.ruscrafting.trails.bukkit
 
 import org.bukkit.Material
 import org.bukkit.entity.Player
+import org.bukkit.event.Event
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -125,18 +126,20 @@ class TrailsListener(
         if (event.action != Action.RIGHT_CLICK_BLOCK || event.hand != EquipmentSlot.HAND) return
         val item = event.item ?: return
         val block = event.clickedBlock ?: return
-        when (plugin.toolKind(item)) {
+        val toolKind = plugin.toolKind(item) ?: return
+        // Tagged Trails tools are dedicated controls. Cancel their vanilla interaction even when
+        // the holder lacks permission so an inspection stick cannot also open or toggle a block.
+        event.setUseInteractedBlock(Event.Result.DENY)
+        event.setUseItemInHand(Event.Result.DENY)
+        when (toolKind) {
             TrailToolKind.ADVANCE -> {
                 if (!event.player.hasPermission("trails.trail-tool")) return
                 plugin.forceTrail(event.player, block)
-                if (item.type.name.endsWith("_SHOVEL")) event.isCancelled = true
             }
             TrailToolKind.INSPECT -> {
                 if (!event.player.hasPermission("trails.info-tool")) return
                 plugin.showTrailInfo(event.player, block)
-                if (item.type.name.endsWith("_SHOVEL")) event.isCancelled = true
             }
-            null -> Unit
         }
     }
 

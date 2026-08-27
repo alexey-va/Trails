@@ -1,8 +1,18 @@
-Trails includes the following relocated runtime libraries:
+Trails 2.2.5 includes the following runtime libraries in its deployable JAR:
 
 - Kotlin standard library 2.4.10 — Apache License 2.0
-  https://github.com/JetBrains/kotlin
-- bStats 3.2.1 — MIT License
-  https://github.com/Bastian/bStats
+  Source: https://github.com/JetBrains/kotlin
+  License text: META-INF/licenses/Apache-2.0.txt
+- JetBrains Java annotations 13.0 — Apache License 2.0
+  Source: https://github.com/JetBrains/java-annotations
+  License text: META-INF/licenses/Apache-2.0.txt
+- arc-core and arc-core-paper 2.0.2 — Apache License 2.0
+  Source: https://github.com/alexey-va/arc-core
+  License text: META-INF/licenses/Apache-2.0.txt
+- bStats base and Bukkit 3.2.1 — MIT License
+  Source: https://github.com/Bastian/bStats
+  License text: META-INF/licenses/bStats-MIT.txt
 
-The corresponding source and license texts are available from the linked upstream projects.
+Kotlin, arc-core, and bStats classes are shaded into the Trails JAR. arc-core and bStats
+packages are relocated to private Trails namespaces. Trails itself is distributed under
+the Unlicense; its complete text is in META-INF/licenses/Trails-UNLICENSE.txt.

@@ -289,6 +289,16 @@ class RoadManager internal constructor(
                 "Road undo protection bypass used by ${player.uniqueId} in ${world.name} for ${blocks.size} committed blocks.",
             )
         }
+        val historyBefore = LinkedHashMap(history)
+        history.remove(player.uniqueId)
+        try {
+            historyStore.save(history)
+        } catch (error: Exception) {
+            history.clear()
+            history.putAll(historyBefore)
+            plugin.logger.severe("Road undo for ${player.name} was rejected because history could not be retired: ${error.message}")
+            return RoadResult("messages.roadUndoFailed")
+        }
         val restored = mutableListOf<RoadBlockRecord>()
         try {
             blocks.forEach { (block, change) ->
@@ -297,12 +307,17 @@ class RoadManager internal constructor(
             }
         } catch (error: Exception) {
             restoreCommittedRoad(world, restored)
+            history.clear()
+            history.putAll(historyBefore)
+            runCatching { historyStore.save(history) }
+                .onFailure { recoveryFailure ->
+                    plugin.logger.severe(
+                        "Road undo history for ${player.name} could not be restored after rollback: ${recoveryFailure.message}",
+                    )
+                }
             plugin.logger.severe("Road undo for ${player.name} was rolled back: ${error.message}")
             return RoadResult("messages.roadUndoFailed")
         }
-        history.remove(player.uniqueId)
-        runCatching { historyStore.save(history) }
-            .onFailure { plugin.logger.warning("Road undo succeeded but road-history.yml could not be updated: ${it.message}") }
         return RoadResult("messages.roadUndone", mapOf("%count%" to blocks.size.toString()))
     }
 
@@ -458,7 +473,6 @@ class RoadManager internal constructor(
                 val rowGrade = rowGrades[sequence] ?: return@mapIndexedNotNull null
                 ResolvedRoadRow(
                     sequence = sequence,
-                    center = directed.row.center,
                     headingFrom = directed.headingFrom,
                     headingTo = directed.headingTo,
                     cells =
@@ -530,8 +544,6 @@ class RoadManager internal constructor(
             val centerHeightDifference = toCenter.y - fromCenter.y
             if (abs(centerHeightDifference) != 1) return@forEach
             val ascending = centerHeightDifference > 0
-            val travelFace = RoadHeightTransitionFactory.travelFace(fromRow.center, toRow.center)
-            val highSide = if (ascending) travelFace else travelFace.oppositeFace
             val highCenter = if (ascending) toCenter else fromCenter
             val transitionMaterial =
                 transitionPalette.select(paletteSample(session, highCenter, 0, PlanRole.HEIGHT_TRANSITION))
@@ -539,6 +551,14 @@ class RoadManager internal constructor(
                 val fromBlock = fromRow.cells.getValue(lane).surface
                 val toBlock = toRow.cells.getValue(lane).surface
                 if (toBlock.y - fromBlock.y != centerHeightDifference) return@forEach
+                val travelFace =
+                    RoadHeightTransitionFactory.transitionTravelFace(
+                        from = RoadPoint(fromBlock.x, fromBlock.z),
+                        to = RoadPoint(toBlock.x, toBlock.z),
+                        headingFrom = toRow.headingFrom,
+                        headingTo = toRow.headingTo,
+                    )
+                val highSide = if (ascending) travelFace else travelFace.oppositeFace
                 val highBlock = if (ascending) toBlock else fromBlock
                 val transition =
                     RoadHeightTransitionFactory.create(
@@ -569,15 +589,23 @@ class RoadManager internal constructor(
             val rightX = -forwardZ
             val rightZ = forwardX
             val targets =
-                pattern.placements.map { placement ->
+                pattern.placements.mapIndexed { placementIndex, placement ->
                     val lateral = placement.lateral * side
                     val x = anchor.x + placement.forward * forwardX + lateral * rightX
                     val y = anchor.y + placement.vertical
                     val z = anchor.z + placement.forward * forwardZ + lateral * rightZ
-                    placement to BlockKey(x, y, z)
+                    val block = player.world.getBlockAt(x, y, z)
+                    PatternTarget(
+                        key = BlockKey(x, y, z),
+                        blockData =
+                            placement.palette.select(
+                                paletteSample(session, block, placementIndex, PlanRole.DECORATION),
+                            ).createBlockData(),
+                    )
                 }
             if (
-                targets.any { (_, key) ->
+                targets.any { target ->
+                    val key = target.key
                     key.y !in player.world.minHeight until player.world.maxHeight ||
                         !player.world.isChunkLoaded(key.x shr 4, key.z shr 4) ||
                         !player.world.getBlockAt(key.x, key.y, key.z).type.isAir ||
@@ -587,19 +615,32 @@ class RoadManager internal constructor(
             ) {
                 return@forEach
             }
+            val targetsByKey = targets.associateBy(PatternTarget::key)
+            if (targets.any { target -> !decorationHasSupport(player.world, target.key, draft.planned, targetsByKey) }) {
+                return@forEach
+            }
             if (draft.planned.size + targets.size > settings.maxPlannedBlocks) {
                 draft.capped = true
                 return@forEach
             }
-            targets.forEachIndexed { placementIndex, (placement, key) ->
+            targets.forEachIndexed { placementIndex, target ->
+                val key = target.key
                 val block = player.world.getBlockAt(key.x, key.y, key.z)
-                val material =
-                    placement.palette.select(
-                        paletteSample(session, block, placementIndex, PlanRole.DECORATION),
-                    )
-                planBlock(session, draft, block, placementIndex, material.createBlockData(), PlanRole.DECORATION)
+                planBlock(session, draft, block, placementIndex, target.blockData, PlanRole.DECORATION)
             }
         }
+    }
+
+    private fun decorationHasSupport(
+        world: World,
+        key: BlockKey,
+        plan: Map<BlockKey, PlannedBlock>,
+        patternTargets: Map<BlockKey, PatternTarget> = emptyMap(),
+    ): Boolean {
+        if (key.y <= world.minHeight) return false
+        val below = BlockKey(key.x, key.y - 1, key.z)
+        val plannedData = patternTargets[below]?.blockData ?: plan[below]?.afterData
+        return plannedData?.material?.isSolid ?: world.getBlockAt(below.x, below.y, below.z).type.isSolid
     }
 
     private fun planBlock(
@@ -665,7 +706,7 @@ class RoadManager internal constructor(
         val (block, planned) = pair
         if (block.blockData.asString != planned.beforeData) return false
         return when (planned.role) {
-            PlanRole.DECORATION -> block.type.isAir
+            PlanRole.DECORATION -> block.type.isAir && decorationHasSupport(block.world, planned.key, plan)
             PlanRole.CLEARANCE -> surfacePolicy.canExcavate(block) || surfacePolicy.canClearAbove(block)
             PlanRole.SURFACE,
             PlanRole.HEIGHT_TRANSITION,
@@ -858,9 +899,13 @@ class RoadManager internal constructor(
         val role: PlanRole,
     )
 
+    private data class PatternTarget(
+        val key: BlockKey,
+        val blockData: BlockData,
+    )
+
     private data class ResolvedRoadRow(
         val sequence: Int,
-        val center: RoadPoint,
         val headingFrom: RoadPoint,
         val headingTo: RoadPoint,
         val cells: Map<Int, ResolvedRoadCell>,

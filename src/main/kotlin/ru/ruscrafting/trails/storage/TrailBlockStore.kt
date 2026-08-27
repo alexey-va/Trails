@@ -8,10 +8,11 @@ import org.bukkit.block.Block
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
+import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.event.world.WorldSaveEvent
-import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.Plugin
+import ru.arc.persistence.DurableAcknowledgementOutcome
 import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
 import ru.ruscrafting.trails.domain.TrailIdentity
@@ -40,9 +41,9 @@ interface TrailBlockStore {
 /**
  * Main-thread chunk-local storage for ordinary block positions.
  *
- * Each loaded chunk is decoded once into memory. Mutations are coalesced until
- * [flushDirty], while unload, world-save, and [close] synchronously flush the
- * complete checksum-protected payload before evicting cache state.
+ * Each loaded chunk is decoded once into memory. Mutations are coalesced into chunk PDC by
+ * [flushDirty]. Unload, world-save, and [close] additionally perform the synchronous write-ahead
+ * durability barrier before Paper may persist or evict the chunk.
  */
 class ChunkPersistentTrailStore internal constructor(
     private val plugin: Plugin,
@@ -58,12 +59,16 @@ class ChunkPersistentTrailStore internal constructor(
                 "${error.javaClass.simpleName}: ${error.message}",
         )
     },
+    private val persistence: TrailChunkPersistence = BukkitTrailChunkPersistence,
+    private val recoveryJournal: TrailChunkRecoveryJournal = TrailChunkRecoveryJournal(plugin.dataFolder.toPath()),
 ) : TrailBlockStore, Listener, AutoCloseable {
     internal val storageKey = NamespacedKey(plugin, "block_states_v1")
     private val chunks = linkedMapOf<ChunkId, CachedChunk>()
+    private val loadedAfterStart = mutableSetOf<ChunkId>()
     private val failedFlushes = mutableSetOf<ChunkId>()
     private val cachedChunks = AtomicInteger()
     private val dirtyChunks = AtomicInteger()
+    private val durabilityPendingChunks = AtomicInteger()
     private val corruptChunks = AtomicInteger()
     private val failedChunks = AtomicInteger()
     private var closed = false
@@ -110,7 +115,7 @@ class ChunkPersistentTrailStore internal constructor(
         check(!closed) { "trail block store is closed" }
         var flushed = 0
         chunks.values.filter(CachedChunk::dirty).toList().forEach { cached ->
-            runCatching { flush(cached) }
+            runCatching { flushPdc(cached) }
                 .onSuccess { flushed++ }
                 .onFailure { error -> recordFlushFailure(cached, error) }
         }
@@ -122,7 +127,7 @@ class ChunkPersistentTrailStore internal constructor(
         val failed = failedChunks.get()
         return RuntimeHealthContribution(
             state = if (corrupt == 0 && failed == 0) RuntimeHealthState.UP else RuntimeHealthState.DEGRADED,
-            recoveryBacklog = dirtyChunks.get(),
+            recoveryBacklog = maxOf(dirtyChunks.get(), durabilityPendingChunks.get()) + recoveryJournal.size(),
             activeLeases = cachedChunks.get(),
             schemas = mapOf("block-storage" to TrailChunkCodec.SCHEMA_VERSION),
             dependencies = mapOf("chunk-pdc" to (failed == 0)),
@@ -132,12 +137,28 @@ class ChunkPersistentTrailStore internal constructor(
     internal fun cachedChunkCount(): Int = cachedChunks.get()
 
     @EventHandler(priority = EventPriority.MONITOR)
+    fun onChunkLoad(event: ChunkLoadEvent) {
+        requirePrimaryThread()
+        val id = id(event.chunk)
+        if (id in failedFlushes || recoveryJournal.load(event.chunk.world.uid, event.chunk.chunkKey) != null) {
+            loadedAfterStart += id
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
     fun onChunkUnload(event: ChunkUnloadEvent) {
         requirePrimaryThread()
         val id = id(event.chunk)
         val cached = chunks[id] ?: return
-        if (cached.dirty) {
-            runCatching { flush(cached) }.onFailure { error -> recordFlushFailure(cached, error) }
+        if (cached.dirty || cached.durabilityPending || recoveryJournal.load(event.chunk.world.uid, event.chunk.chunkKey) != null) {
+            event.isSaveChunk = true
+        }
+        if (cached.dirty || cached.durabilityPending) {
+            runCatching { flushDurably(cached) }.onFailure { error ->
+                recordFlushFailure(cached, error)
+                runCatching { flushPdcFallback(cached) }
+                    .onFailure { fallbackFailure -> error.addSuppressed(fallbackFailure) }
+            }
         }
         evict(id, cached)
     }
@@ -152,9 +173,9 @@ class ChunkPersistentTrailStore internal constructor(
         requirePrimaryThread()
         if (closed) return
         var firstFailure: Throwable? = null
-        chunks.values.filter(CachedChunk::dirty).toList().forEach { cached ->
+        chunks.values.filter { it.dirty || it.durabilityPending }.toList().forEach { cached ->
             try {
-                flush(cached)
+                flushDurably(cached)
             } catch (failure: Throwable) {
                 recordFlushFailure(cached, failure)
                 val previous = firstFailure
@@ -167,8 +188,8 @@ class ChunkPersistentTrailStore internal constructor(
     }
 
     private fun flushWorld(world: World) {
-        chunks.values.filter { it.chunk.world.uid == world.uid && it.dirty }.toList().forEach { cached ->
-            runCatching { flush(cached) }.onFailure { error -> recordFlushFailure(cached, error) }
+        chunks.values.filter { it.chunk.world.uid == world.uid && (it.dirty || it.durabilityPending) }.toList().forEach { cached ->
+            runCatching { flushDurably(cached) }.onFailure { error -> recordFlushFailure(cached, error) }
         }
     }
 
@@ -176,13 +197,29 @@ class ChunkPersistentTrailStore internal constructor(
         check(!closed) { "trail block store is closed" }
         val id = id(chunk)
         return chunks.getOrPut(id) {
-            val encoded = chunk.persistentDataContainer.get(storageKey, PersistentDataType.BYTE_ARRAY)
+            val encoded = persistence.read(chunk, storageKey)
+            val recovery = recoveryJournal.load(chunk.world.uid, chunk.chunkKey)
             var corrupt = false
+            var dirty = false
             val states =
-                if (encoded == null) {
+                if (recovery != null) {
+                    val recovered = TrailChunkCodec.decode(recovery.encodedStates).also { validatePositions(chunk, it.keys) }
+                    val persisted = if (recovered.isEmpty()) encoded == null else encoded?.contentEquals(recovery.encodedStates) == true
+                    if (persisted && id in loadedAfterStart) {
+                        check(recoveryJournal.acknowledge(recovery) != DurableAcknowledgementOutcome.CONTENT_MISMATCH) {
+                            "Trail recovery record changed during acknowledgement"
+                        }
+                        clearFlushFailure(id)
+                    } else if (!persisted) {
+                        dirty = true
+                    }
+                    recovered
+                } else if (encoded == null) {
+                    if (id in loadedAfterStart) clearFlushFailure(id)
                     linkedMapOf()
                 } else {
                     runCatching { TrailChunkCodec.decode(encoded).also { validatePositions(chunk, it.keys) } }
+                        .onSuccess { if (id in loadedAfterStart) clearFlushFailure(id) }
                         .getOrElse { error ->
                             corrupt = true
                             corruptChunks.incrementAndGet()
@@ -191,9 +228,16 @@ class ChunkPersistentTrailStore internal constructor(
                         }
                 }
             cachedChunks.incrementAndGet()
-            CachedChunk(chunk, states, dirty = corrupt, corrupt = corrupt).also {
-                if (corrupt) dirtyChunks.incrementAndGet()
-            }
+            CachedChunk(
+                chunk = chunk,
+                states = states,
+                dirty = dirty || corrupt,
+                durabilityPending = corrupt,
+                corrupt = corrupt,
+            ).also {
+                if (it.dirty) dirtyChunks.incrementAndGet()
+                if (it.durabilityPending) durabilityPendingChunks.incrementAndGet()
+            }.also { loadedAfterStart.remove(id) }
         }
     }
 
@@ -209,28 +253,56 @@ class ChunkPersistentTrailStore internal constructor(
         }
     }
 
-    private fun flush(cached: CachedChunk) {
-        if (!cached.dirty) return
-        val container = cached.chunk.persistentDataContainer
-        if (cached.states.isEmpty()) {
-            container.remove(storageKey)
-        } else {
-            container.set(storageKey, PersistentDataType.BYTE_ARRAY, TrailChunkCodec.encode(cached.states))
+    private fun flushDurably(cached: CachedChunk) {
+        if (!cached.dirty && !cached.durabilityPending) return
+        val encoded = TrailChunkCodec.encode(cached.states)
+        if (cached.durabilityPending) {
+            recoveryJournal.commit(TrailChunkSnapshot(cached.chunk.world.uid, cached.chunk.chunkKey, encoded))
+            cached.durabilityPending = false
+            durabilityPendingChunks.decrementAndGet()
         }
+        if (cached.dirty) {
+            writePdc(cached, encoded)
+            markPdcFlushed(cached)
+        }
+    }
+
+    private fun flushPdc(cached: CachedChunk) {
+        if (!cached.dirty) return
+        val encoded = TrailChunkCodec.encode(cached.states)
+        writePdc(cached, encoded)
+        markPdcFlushed(cached)
+    }
+
+    /** Last-resort unload path when the write-ahead journal itself is unavailable. */
+    private fun flushPdcFallback(cached: CachedChunk) {
+        val encoded = TrailChunkCodec.encode(cached.states)
+        writePdc(cached, encoded)
+        markPdcFlushed(cached)
+    }
+
+    private fun writePdc(cached: CachedChunk, encoded: ByteArray) {
+        persistence.write(cached.chunk, storageKey, encoded.takeUnless { cached.states.isEmpty() })
+    }
+
+    private fun markPdcFlushed(cached: CachedChunk) {
         cached.dirty = false
         dirtyChunks.decrementAndGet()
         if (cached.corrupt) {
             cached.corrupt = false
             corruptChunks.decrementAndGet()
         }
-        val id = id(cached.chunk)
-        if (failedFlushes.remove(id)) failedChunks.decrementAndGet()
     }
 
     private fun markDirty(cached: CachedChunk) {
-        if (cached.dirty) return
-        cached.dirty = true
-        dirtyChunks.incrementAndGet()
+        if (!cached.dirty) {
+            cached.dirty = true
+            dirtyChunks.incrementAndGet()
+        }
+        if (!cached.durabilityPending) {
+            cached.durabilityPending = true
+            durabilityPendingChunks.incrementAndGet()
+        }
     }
 
     private fun recordFlushFailure(
@@ -244,6 +316,10 @@ class ChunkPersistentTrailStore internal constructor(
         }
     }
 
+    private fun clearFlushFailure(id: ChunkId) {
+        if (failedFlushes.remove(id)) failedChunks.decrementAndGet()
+    }
+
     private fun evict(
         id: ChunkId,
         cached: CachedChunk,
@@ -251,8 +327,9 @@ class ChunkPersistentTrailStore internal constructor(
         if (chunks.remove(id) == null) return
         cachedChunks.decrementAndGet()
         if (cached.dirty) dirtyChunks.decrementAndGet()
+        if (cached.durabilityPending) durabilityPendingChunks.decrementAndGet()
         if (cached.corrupt) corruptChunks.decrementAndGet()
-        if (failedFlushes.remove(id)) failedChunks.decrementAndGet()
+        loadedAfterStart.remove(id)
     }
 
     private fun position(block: Block): Int =
@@ -273,6 +350,7 @@ class ChunkPersistentTrailStore internal constructor(
         val chunk: Chunk,
         val states: LinkedHashMap<Int, TrailBlockState>,
         var dirty: Boolean,
+        var durabilityPending: Boolean,
         var corrupt: Boolean,
     )
 

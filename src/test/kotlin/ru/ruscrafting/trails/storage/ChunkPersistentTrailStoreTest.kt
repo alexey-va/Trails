@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.bukkit.Material
+import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.persistence.PersistentDataType
 import ru.arc.observability.RuntimeHealthState
@@ -59,6 +60,51 @@ class ChunkPersistentTrailStoreTest :
             store.cachedChunkCount() shouldBe 0
             block.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe true
             store.close()
+        }
+
+        "failed chunk PDC writes recover from the durable journal after a real reload" {
+            val plugin = runtime.createSimplePlugin("TrailRecoveryTest")
+            val world = runtime.addSimpleWorld("world")
+            val block = world.getBlockAt(7, 81, 9).also { it.type = Material.DIRT }
+            val expected = TrailBlockState(TrailIdentity("DirtPath", 2), 6)
+            val failures = mutableListOf<Throwable>()
+            val failingPersistence =
+                object : TrailChunkPersistence by BukkitTrailChunkPersistence {
+                    override fun write(chunk: org.bukkit.Chunk, key: org.bukkit.NamespacedKey, encoded: ByteArray?) {
+                        throw IllegalStateException("simulated PDC failure")
+                    }
+                }
+            val store =
+                ChunkPersistentTrailStore(
+                    plugin = plugin,
+                    persistenceFailureSink = { _, error -> failures += error },
+                    persistence = failingPersistence,
+                )
+            store.write(block, expected)
+            val failedUnload = ChunkUnloadEvent(block.chunk, false)
+
+            store.onChunkUnload(failedUnload)
+
+            failedUnload.isSaveChunk shouldBe true
+            store.cachedChunkCount() shouldBe 0
+            store.healthContribution().state shouldBe RuntimeHealthState.DEGRADED
+            store.healthContribution().recoveryBacklog shouldBe 1
+            failures.size shouldBe 1
+            block.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
+            store.close()
+
+            val recovered = ChunkPersistentTrailStore(plugin)
+            recovered.onChunkLoad(ChunkLoadEvent(block.chunk, false))
+            recovered.read(block) shouldBe expected
+            recovered.flushDirty() shouldBe 1
+            recovered.healthContribution().recoveryBacklog shouldBe 1
+            recovered.onChunkUnload(ChunkUnloadEvent(block.chunk, true))
+            recovered.onChunkLoad(ChunkLoadEvent(block.chunk, false))
+
+            recovered.read(block) shouldBe expected
+            recovered.healthContribution().recoveryBacklog shouldBe 0
+            recovered.healthContribution().state shouldBe RuntimeHealthState.UP
+            recovered.close()
         }
 
         "clearing the final entry removes the chunk PDC payload" {

@@ -136,7 +136,7 @@ object TrailsSettingsLoader {
                 boostEnabledByDefault = boolean(config, "player-defaults.speed-boost-enabled", true, problems),
                 runModifier = doubleInRange(config, "trail-creation.sprint-progress-multiplier", 1.5, 0.0..10.0, problems),
                 sneakBypass = !boolean(config, "trail-creation.while-sneaking", false, problems),
-                speedBoostInterval = positiveLong(config, "speed-boost.update-interval-ticks", 1L, problems),
+                speedBoostInterval = boundedPositiveLong(config, "speed-boost.update-interval-ticks", 1L, MAX_TICK_INTERVAL, problems),
                 speedBoostStep = doubleInRange(config, "speed-boost.adjustment-step", 0.006, 0.0001..1.0, problems),
                 speedBoostOnlyTrails = boolean(config, "speed-boost.only-created-trails", true, problems),
                 usePermissionForTrails = boolean(config, "trail-creation.require-permission", false, problems),
@@ -147,7 +147,7 @@ object TrailsSettingsLoader {
                 trailDecay = boolean(config, "decay.enabled", true, problems),
                 decayFraction = percent(config, "decay.blocks-per-chunk-percent", 3.0, problems),
                 chunkChance = percent(config, "decay.chunk-selection-chance-percent", 20.0, problems),
-                decayTimer = positiveLong(config, "decay.interval-ticks", 1200L, problems),
+                decayTimer = boundedPositiveLong(config, "decay.interval-ticks", 1200L, MAX_TICK_INTERVAL, problems),
                 decayDistance = doubleInRange(config, "decay.minimum-player-distance-blocks", 5.0, 0.0..128.0, problems),
                 stepDecayFraction = percent(config, "decay.step-counter-reduction-percent", 10.0, problems),
                 strictLinks = boolean(config, "trail-creation.strict-stage-order", false, problems),
@@ -155,8 +155,10 @@ object TrailsSettingsLoader {
                 worldMode = worldMode,
                 enabledWorlds = worlds,
                 sendDenyMessage = boolean(config, "messages.protection-denied.enabled", false, problems),
-                denyMessageIntervalSeconds = positiveLong(config, "messages.protection-denied.cooldown-seconds", 10L, problems),
-                saveIntervalMinutes = positiveLong(config, "storage.player-preferences-save-interval-minutes", 5L, problems),
+                denyMessageIntervalSeconds =
+                    boundedPositiveLong(config, "messages.protection-denied.cooldown-seconds", 10L, MAX_COOLDOWN_SECONDS, problems),
+                saveIntervalMinutes =
+                    boundedPositiveLong(config, "storage.player-preferences-save-interval-minutes", 5L, MAX_SAVE_INTERVAL_MINUTES, problems),
                 integrations =
                     IntegrationSettings(
                         blockPlaceCompatibilityEvent =
@@ -169,11 +171,22 @@ object TrailsSettingsLoader {
         return settings
     }
 
-    private fun positiveLong(config: YamlConfig, path: String, default: Long, problems: MutableList<String>): Long {
+    private fun boundedPositiveLong(
+        config: YamlConfig,
+        path: String,
+        default: Long,
+        maximum: Long,
+        problems: MutableList<String>,
+    ): Long {
         val value = integer(config, path, default, problems)
         if (value <= 0) problems += "$path must be positive"
+        if (value > maximum) problems += "$path must not exceed $maximum"
         return value
     }
+
+    private const val MAX_TICK_INTERVAL = 12_096_000L
+    private const val MAX_COOLDOWN_SECONDS = 86_400L
+    private const val MAX_SAVE_INTERVAL_MINUTES = 1_440L
 
     private fun itemMaterial(
         path: String,
@@ -285,7 +298,7 @@ object LegacyTrailsSettingsLoader {
             return value
         }
 
-        fun positiveLong(path: String, default: Long): Long {
+        fun boundedPositiveLong(path: String, default: Long, maximum: Long): Long {
             val raw = config.value(path)
             val value =
                 when (raw) {
@@ -306,6 +319,7 @@ object LegacyTrailsSettingsLoader {
                 return default
             }
             if (value <= 0) problems += "$path must be positive"
+            if (value > maximum) problems += "$path must not exceed $maximum"
             return value
         }
 
@@ -352,7 +366,7 @@ object LegacyTrailsSettingsLoader {
                 boostEnabledByDefault = config.boolean("General.boost-enabled-by-default", true),
                 runModifier = doubleInRange("General.run-modifier", 1.5, 0.0..10.0),
                 sneakBypass = config.boolean("General.sneak-bypass", true),
-                speedBoostInterval = positiveLong("General.speed-boost-interval", 1L),
+                speedBoostInterval = boundedPositiveLong("General.speed-boost-interval", 1L, MAX_TICK_INTERVAL),
                 speedBoostStep = doubleInRange("General.speed-boost-step", 0.006, 0.0001..1.0),
                 speedBoostOnlyTrails = config.boolean("General.speed-boost-only-trails", true),
                 usePermissionForTrails = config.boolean("General.use-permission-for-trails", false),
@@ -363,7 +377,7 @@ object LegacyTrailsSettingsLoader {
                 trailDecay = config.boolean("General.trail-decay", true),
                 decayFraction = doubleInRange("General.decay-fraction", 0.03, 0.0..1.0),
                 chunkChance = doubleInRange("General.chunk-chance", 0.2, 0.0..1.0),
-                decayTimer = positiveLong("General.decay-timer", 1200L),
+                decayTimer = boundedPositiveLong("General.decay-timer", 1200L, MAX_TICK_INTERVAL),
                 decayDistance = doubleInRange("General.decay-distance", 5.0, 0.0..128.0),
                 stepDecayFraction = doubleInRange("General.step-decay-fraction", 0.1, 0.0..1.0),
                 strictLinks = config.boolean("General.strict-links", false),
@@ -371,8 +385,8 @@ object LegacyTrailsSettingsLoader {
                 worldMode = if (allWorlds) WorldMode.ALL else WorldMode.ALLOWLIST,
                 enabledWorlds = worlds.filterNot { it.equals("all", ignoreCase = true) }.toSet(),
                 sendDenyMessage = config.boolean("Messages.SendDenyMessage", false),
-                denyMessageIntervalSeconds = positiveLong("Messages.Interval", 10L),
-                saveIntervalMinutes = positiveLong("Data-Saving.Interval", 5L),
+                denyMessageIntervalSeconds = boundedPositiveLong("Messages.Interval", 10L, MAX_COOLDOWN_SECONDS),
+                saveIntervalMinutes = boundedPositiveLong("Data-Saving.Interval", 5L, MAX_SAVE_INTERVAL_MINUTES),
                 integrations =
                     IntegrationSettings(
                         blockPlaceCompatibilityEvent = true,
@@ -401,4 +415,8 @@ object LegacyTrailsSettingsLoader {
                 }
             }
         }
+
+    private const val MAX_TICK_INTERVAL = 12_096_000L
+    private const val MAX_COOLDOWN_SECONDS = 86_400L
+    private const val MAX_SAVE_INTERVAL_MINUTES = 1_440L
 }

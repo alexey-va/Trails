@@ -46,4 +46,31 @@ internal object RoadHeightTransitionFactory {
             if (zDelta > 0) BlockFace.SOUTH else BlockFace.NORTH
         }
     }
+
+    /**
+     * Resolves the direction of one rasterized road step. Bresenham can move on both axes in a
+     * single step even when one axis clearly dominates the road segment. Using that diagonal as
+     * an arbitrary tie made isolated stair rows turn sideways. The segment heading breaks only
+     * diagonal (or stationary inside-corner lane) ties; genuine cardinal steps remain unchanged.
+     */
+    internal fun transitionTravelFace(
+        from: RoadPoint,
+        to: RoadPoint,
+        headingFrom: RoadPoint,
+        headingTo: RoadPoint,
+    ): BlockFace {
+        val xDelta = to.x - from.x
+        val zDelta = to.z - from.z
+        return if (xDelta == 0 || zDelta == 0) {
+            if (xDelta == 0 && zDelta == 0) travelFace(headingFrom, headingTo) else travelFace(from, to)
+        } else {
+            val headingX = headingTo.x - headingFrom.x
+            val headingZ = headingTo.z - headingFrom.z
+            if (abs(headingX) >= abs(headingZ)) {
+                if (xDelta > 0) BlockFace.EAST else BlockFace.WEST
+            } else {
+                if (zDelta > 0) BlockFace.SOUTH else BlockFace.NORTH
+            }
+        }
+    }
 }

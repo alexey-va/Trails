@@ -93,14 +93,15 @@ for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. Surface materials are se
 transition material is selected for the complete cross-road row so contrasting stairs cannot appear as isolated
 teeth. The selection is stable for the lifetime of one preview.
 One-block height changes can use bottom slabs or direction-aware bottom stairs; stairs face along the road toward the
-higher end. A height transition is emitted only when the centerline changes height and a lane follows the same step,
+higher end. Diagonal raster steps use the dominant direction of their current route segment, so isolated stair rows
+do not turn sideways, including when the route is captured while moving backwards. A height transition is emitted only when the centerline changes height and a lane follows the same step,
 which prevents isolated side slopes from producing sideways stair tangles. Periodic forms are reusable rotated
 structures with forward, lateral, and vertical offsets. Their interval, side alternation, placements, and weighted
 materials are configurable. The bundled `lantern_lane` profile places an alternating cobblestone-wall, fence, and
 lantern post every 12 blocks. The bundled catalog now contains 29 profiles. Eight `-big` profiles are seven blocks
 wide and add paired lanterns or beacons to royal, forest, harbor, sandstone, Nether, frozen, prismarine, and tuff
 themes. Forms must remain outside road lanes
-and are skipped as a whole if any target is occupied, any part intersects any current or later road column, or the
+and are skipped as a whole if any target is occupied, lacks solid support, intersects any current or later road column, or the
 complete form would exceed the preview limit.
 
 Commit reloads already-previewed generated chunks within a fixed resource bound, rebuilds the plan from current world
@@ -118,7 +119,7 @@ while every road block still exactly matches the committed snapshot, so it canno
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.2.4.jar`.
+The deployable JAR is written to `build/libs/Trails-2.2.5.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven
@@ -129,7 +130,8 @@ repository. Trails shades and relocates `arc-core-paper` for lifecycle, task own
 diagnostics; tests use `arc-core-paper-testing` to own MockBukkit's process-global lifecycle consistently. Production
 persistence remains in Trails' narrow adapters. Trail block state is decoded once per loaded chunk, served from an
 in-memory index, and coalesced into one bounded binary chunk payload every second, on chunk unload, world save, or
-plugin shutdown.
+plugin shutdown. Every changed chunk receives an atomic write-ahead recovery snapshot before its PDC is mutated; the
+snapshot remains until a later chunk load proves Paper persisted the same state.
 
 ## Architecture
 
@@ -144,4 +146,5 @@ plugin shutdown.
 ## License
 
 The Trails source retains the repository's existing [Unlicense](LICENSE). The deployable JAR also contains relocated
-third-party libraries under their own licenses; see `THIRD_PARTY_NOTICES.txt` inside the artifact.
+third-party libraries under their own licenses; the deployable JAR contains the complete license texts under
+`META-INF/licenses/` and the exact inventory in `THIRD_PARTY_NOTICES.txt`.

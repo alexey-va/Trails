@@ -7,7 +7,7 @@ coreprotect = "23.2"
 placeholder-api = "2.12.3"
 kotest = "6.2.4"
 mockk = "1.14.11"
-arc-core = "2.0.0"
+arc-core = "2.0.2"
 
 [libraries]
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }

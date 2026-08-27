@@ -8,6 +8,7 @@ import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.type.Slab
 import org.bukkit.block.data.type.Stairs
 import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.ruscrafting.trails.domain.RoadPoint
 
 class RoadHeightTransitionFactoryTest :
     FreeSpec({
@@ -40,5 +41,37 @@ class RoadHeightTransitionFactoryTest :
 
             data.type shouldBe Slab.Type.BOTTOM
             data.isWaterlogged shouldBe false
+        }
+
+        "diagonal raster steps keep the dominant road heading instead of turning sideways" {
+            RoadHeightTransitionFactory.transitionTravelFace(
+                from = RoadPoint(10, 10),
+                to = RoadPoint(11, 11),
+                headingFrom = RoadPoint(0, 0),
+                headingTo = RoadPoint(8, 3),
+            ) shouldBe BlockFace.EAST
+
+            RoadHeightTransitionFactory.transitionTravelFace(
+                from = RoadPoint(10, 10),
+                to = RoadPoint(11, 11),
+                headingFrom = RoadPoint(0, 0),
+                headingTo = RoadPoint(3, 8),
+            ) shouldBe BlockFace.SOUTH
+
+            RoadHeightTransitionFactory.transitionTravelFace(
+                from = RoadPoint(11, 11),
+                to = RoadPoint(10, 10),
+                headingFrom = RoadPoint(8, 3),
+                headingTo = RoadPoint(0, 0),
+            ) shouldBe BlockFace.WEST
+        }
+
+        "cardinal lane movement wins even at a turn" {
+            RoadHeightTransitionFactory.transitionTravelFace(
+                from = RoadPoint(10, 10),
+                to = RoadPoint(11, 10),
+                headingFrom = RoadPoint(10, 10),
+                headingTo = RoadPoint(10, 20),
+            ) shouldBe BlockFace.EAST
         }
     })

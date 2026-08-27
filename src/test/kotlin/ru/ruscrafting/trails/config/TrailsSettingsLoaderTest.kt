@@ -116,6 +116,30 @@ class TrailsSettingsLoaderTest :
             }
         }
 
+        "rejects scheduler intervals that can overflow or create unusable runtimes" {
+            val folder = Files.createTempDirectory("trails-settings-")
+            try {
+                writeValidConfiguration(folder)
+                Files.writeString(
+                    folder.resolve("config.yml"),
+                    Files.readString(folder.resolve("config.yml"))
+                        .replace("  update-interval-ticks: 1", "  update-interval-ticks: ${Long.MAX_VALUE}")
+                        .replace("  interval-ticks: 1200", "  interval-ticks: ${Long.MAX_VALUE}")
+                        .replace("    cooldown-seconds: 10", "    cooldown-seconds: ${Long.MAX_VALUE}")
+                        .replace("  player-preferences-save-interval-minutes: 5", "  player-preferences-save-interval-minutes: ${Long.MAX_VALUE}"),
+                )
+
+                val error = shouldThrow<TrailsSettingsException> { load(folder) }
+
+                error.problems shouldContain "speed-boost.update-interval-ticks must not exceed 12096000"
+                error.problems shouldContain "decay.interval-ticks must not exceed 12096000"
+                error.problems shouldContain "messages.protection-denied.cooldown-seconds must not exceed 86400"
+                error.problems shouldContain "storage.player-preferences-save-interval-minutes must not exceed 1440"
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
+
         "rejects a malformed protection compatibility toggle" {
             val folder = Files.createTempDirectory("trails-settings-")
             try {
