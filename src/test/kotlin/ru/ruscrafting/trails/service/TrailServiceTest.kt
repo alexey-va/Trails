@@ -14,6 +14,7 @@ import org.bukkit.entity.Player
 import ru.ruscrafting.trails.domain.TrailCatalog
 import ru.ruscrafting.trails.domain.TrailDefinition
 import ru.ruscrafting.trails.domain.TrailIdentity
+import ru.ruscrafting.trails.domain.TrailEnvironment
 import ru.ruscrafting.trails.domain.TrailStage
 import ru.ruscrafting.trails.storage.TrailBlockState
 import ru.ruscrafting.trails.storage.TrailBlockStore
@@ -33,9 +34,14 @@ class TrailServiceTest :
             val changes = mutableListOf<Triple<String, BlockState, BlockState>>()
             val service = service(store, BlockChangeObserver { actor, old, new -> changes += Triple(actor, old, new) })
 
-            service.walk(player, block, sprintModifier = 1.5) shouldBe true
+            service.walk(player, block, sprintModifier = 1.5) shouldBe
+                TrailWalkResult.Counted(service.inspection(block)!!.stage, 0, 1)
             store.read(block) shouldBe TrailBlockState(TrailIdentity("DirtPath", 0), 1)
-            service.walk(player, block, sprintModifier = 1.5) shouldBe true
+            service.walk(player, block, sprintModifier = 1.5) shouldBe
+                TrailWalkResult.Advanced(
+                    TrailStage("DirtPath", 0, "GRASS_BLOCK", 2, 100.0, 1.1),
+                    TrailStage("DirtPath", 1, "DIRT", 3, 100.0, 1.2),
+                )
 
             verify(exactly = 1) { block.setType(Material.DIRT, false) }
             store.read(block) shouldBe TrailBlockState(TrailIdentity("DirtPath", 1), 0)
@@ -65,11 +71,12 @@ class TrailServiceTest :
             val store = InMemoryTrailBlockStore()
             val service = service(store)
 
-            service.walk(player, block, sprintModifier = 1.5) shouldBe true
-            service.walk(player, block, sprintModifier = 1.5) { target ->
+            service.walk(player, block, sprintModifier = 1.5) shouldBe
+                TrailWalkResult.Counted(service.inspection(block)!!.stage, 0, 1)
+            service.walk(player, block, sprintModifier = 1.5) { _, target ->
                 target shouldBe Material.DIRT
                 false
-            } shouldBe false
+            } shouldBe TrailWalkResult.NoChange
 
             verify(exactly = 0) { block.setType(any<Material>(), any<Boolean>()) }
             store.read(block) shouldBe TrailBlockState(TrailIdentity("DirtPath", 0), 1)
@@ -100,15 +107,16 @@ class TrailServiceTest :
             val context = service.movementContext(block)
             service.speedMultiplier(context, onlyTrackedTrails = false) shouldBe 1.1
             service.canAffect(context) shouldBe true
-            service.walk(player, context, sprintModifier = 1.5) shouldBe true
+            service.walk(player, context, sprintModifier = 1.5) shouldBe
+                TrailWalkResult.Counted(context.stage!!, 0, 1)
 
             store.readCount shouldBe 1
         }
 
         "piston movement preserves adjacent trail states without overwriting them" {
-            val first = mockk<Block>()
-            val second = mockk<Block>()
-            val third = mockk<Block>()
+            val first = mockk<Block>(relaxed = true)
+            val second = mockk<Block>(relaxed = true)
+            val third = mockk<Block>(relaxed = true)
             every { first.getRelative(BlockFace.EAST) } returns second
             every { second.getRelative(BlockFace.EAST) } returns third
             val store = InMemoryTrailBlockStore()
@@ -126,8 +134,8 @@ class TrailServiceTest :
         }
 
         "piston movement clears stale state at a replaced destination" {
-            val source = mockk<Block>()
-            val destination = mockk<Block>()
+            val source = mockk<Block>(relaxed = true)
+            val destination = mockk<Block>(relaxed = true)
             every { source.getRelative(BlockFace.EAST) } returns destination
             val store = InMemoryTrailBlockStore()
             store.write(destination, TrailBlockState(TrailIdentity("DirtPath", 1), 2))
@@ -136,6 +144,109 @@ class TrailServiceTest :
             service.move(listOf(source), BlockFace.EAST)
 
             store.read(destination) shouldBe null
+        }
+
+        "popular terminal traffic adds exactly one symmetric pair of worn shoulders" {
+            val center = mockk<Block>(relaxed = true)
+            val north = mockk<Block>(relaxed = true)
+            val south = mockk<Block>(relaxed = true)
+            every { center.type } returns Material.DIRT_PATH
+            every { north.type } returns Material.GRASS_BLOCK
+            every { south.type } returns Material.GRASS_BLOCK
+            every { center.getRelative(BlockFace.NORTH) } returns north
+            every { center.getRelative(BlockFace.SOUTH) } returns south
+            val player = mockk<Player>()
+            every { player.name } returns "PopularWalker"
+            every { player.isSprinting } returns false
+            val store = InMemoryTrailBlockStore()
+            store.write(center, TrailBlockState(TrailIdentity("WidePath", 2), 1))
+            val stages =
+                listOf(
+                    TrailStage("WidePath", 0, "GRASS_BLOCK", 2, 100.0, 1.0),
+                    TrailStage("WidePath", 1, "DIRT", 2, 100.0, 1.1),
+                    TrailStage("WidePath", 2, "DIRT_PATH", 1, 100.0, 1.2),
+                )
+            val service =
+                TrailService(
+                    catalog = TrailCatalog(listOf(TrailDefinition("WidePath", stages)), strictLinks = false),
+                    store = store,
+                    randomPercent = { 0.0 },
+                    currentTimeMillis = { 1_000L },
+                    environmentOf = { TrailEnvironment("world", "minecraft:plains") },
+                )
+
+            service.walk(
+                player,
+                center,
+                sprintModifier = 1.0,
+                popularThreshold = 2,
+                wideningDirection = BlockFace.EAST,
+            ) shouldBe TrailWalkResult.Widened(stages.last(), listOf(north, south))
+
+            verify(exactly = 1) { north.setType(Material.DIRT, false) }
+            verify(exactly = 1) { south.setType(Material.DIRT, false) }
+            store.read(north) shouldBe TrailBlockState(stages[1].identity, 0)
+            store.read(south) shouldBe TrailBlockState(stages[1].identity, 0)
+            store.read(center) shouldBe TrailBlockState(stages[2].identity, 0)
+
+            service.walk(
+                player,
+                center,
+                sprintModifier = 1.0,
+                popularThreshold = 2,
+                wideningDirection = BlockFace.EAST,
+            ) shouldBe TrailWalkResult.PopularCounted(stages.last(), 1)
+            service.walk(
+                player,
+                center,
+                sprintModifier = 1.0,
+                popularThreshold = 2,
+                wideningDirection = BlockFace.EAST,
+            ) shouldBe TrailWalkResult.PopularCounted(stages.last(), 1)
+            verify(exactly = 1) { north.setType(Material.DIRT, false) }
+            verify(exactly = 1) { south.setType(Material.DIRT, false) }
+        }
+
+        "popular widening changes neither shoulder when protection rejects one side" {
+            val center = mockk<Block>(relaxed = true)
+            val north = mockk<Block>(relaxed = true)
+            val south = mockk<Block>(relaxed = true)
+            every { center.type } returns Material.DIRT_PATH
+            every { north.type } returns Material.GRASS_BLOCK
+            every { south.type } returns Material.GRASS_BLOCK
+            every { center.getRelative(BlockFace.NORTH) } returns north
+            every { center.getRelative(BlockFace.SOUTH) } returns south
+            val player = mockk<Player>()
+            every { player.name } returns "ProtectedPopularWalker"
+            every { player.isSprinting } returns false
+            val store = InMemoryTrailBlockStore()
+            val stages =
+                listOf(
+                    TrailStage("WidePath", 0, "GRASS_BLOCK", 2, 100.0, 1.0),
+                    TrailStage("WidePath", 1, "DIRT", 2, 100.0, 1.1),
+                    TrailStage("WidePath", 2, "DIRT_PATH", 1, 100.0, 1.2),
+                )
+            store.write(center, TrailBlockState(stages.last().identity, 1))
+            val service =
+                TrailService(
+                    catalog = TrailCatalog(listOf(TrailDefinition("WidePath", stages)), strictLinks = false),
+                    store = store,
+                    randomPercent = { 0.0 },
+                    environmentOf = { TrailEnvironment("world", "minecraft:plains") },
+                )
+
+            service.walk(
+                player,
+                center,
+                sprintModifier = 1.0,
+                popularThreshold = 2,
+                wideningDirection = BlockFace.EAST,
+            ) { block, _ -> block !== south } shouldBe TrailWalkResult.PopularCounted(stages.last(), 1)
+
+            verify(exactly = 0) { north.setType(any<Material>(), any<Boolean>()) }
+            verify(exactly = 0) { south.setType(any<Material>(), any<Boolean>()) }
+            store.read(north) shouldBe null
+            store.read(south) shouldBe null
         }
     }) {
     companion object {
@@ -151,7 +262,14 @@ class TrailServiceTest :
                         TrailStage("DirtPath", 1, "DIRT", 3, 100.0, 1.2),
                     ),
                 )
-            return TrailService(TrailCatalog(listOf(definition), strictLinks = false), store, observer) { 0.0 }
+            return TrailService(
+                catalog = TrailCatalog(listOf(definition), strictLinks = false),
+                store = store,
+                observer = observer,
+                randomPercent = { 0.0 },
+                currentTimeMillis = { 1_000L },
+                environmentOf = { TrailEnvironment("world", "minecraft:plains") },
+            )
         }
     }
 }

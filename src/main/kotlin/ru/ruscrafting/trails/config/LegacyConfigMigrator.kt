@@ -11,6 +11,7 @@ import java.nio.file.StandardCopyOption
 data class ConfigMigrationResult(
     val migrated: Boolean,
     val backup: Path? = null,
+    val addedDefaults: Set<String> = emptySet(),
 )
 
 class LegacyConfigMigrator(

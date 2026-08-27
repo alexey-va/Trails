@@ -25,10 +25,12 @@ import ru.ruscrafting.trails.bukkit.RuntimeTaskSupervisor
 import ru.ruscrafting.trails.bukkit.TrailsCommand
 import ru.ruscrafting.trails.bukkit.TrailsListener
 import ru.ruscrafting.trails.bukkit.TrailToolKind
+import ru.ruscrafting.trails.bukkit.TrailFeedback
 import ru.ruscrafting.trails.config.LocaleService
 import ru.ruscrafting.trails.config.RoadSettings
 import ru.ruscrafting.trails.config.TrailsConfiguration
 import ru.ruscrafting.trails.config.TrailsSettings
+import ru.ruscrafting.trails.config.TrailsSettingsLoader
 import ru.ruscrafting.trails.domain.TrailCatalog
 import ru.ruscrafting.trails.integration.BukkitEventProtection
 import ru.ruscrafting.trails.integration.CoreProtectObserver
@@ -52,6 +54,7 @@ open class TrailsPlugin : JavaPlugin() {
     private lateinit var preferences: PlayerPreferencesStore
     private lateinit var blockStore: ChunkPersistentTrailStore
     private lateinit var trailService: TrailService
+    private lateinit var trailFeedback: TrailFeedback
     @Volatile
     private lateinit var roadSettings: RoadSettings
     private lateinit var roadManager: RoadManager
@@ -71,7 +74,12 @@ open class TrailsPlugin : JavaPlugin() {
                 dataFolder = dataFolder.toPath(),
                 ensureBundledResource = ::ensureBundledResource,
                 migrationReporter = { migration ->
-                    logger.info("Migrated config.yml to schema v3; backup: ${migration.backup?.fileName}")
+                    val details =
+                        buildList {
+                            migration.backup?.let { add("backup=${it.fileName}") }
+                            if (migration.addedDefaults.isNotEmpty()) add("defaults=${migration.addedDefaults.size}")
+                        }.joinToString(", ").ifEmpty { "no extra details" }
+                    logger.info("Migrated config.yml to schema v${TrailsSettingsLoader.CONFIG_VERSION}; $details")
                 },
             )
         configuration.load(reload = false)
@@ -189,6 +197,7 @@ open class TrailsPlugin : JavaPlugin() {
         player: Player,
         block: Block,
         createTrail: Boolean = true,
+        movementDirection: BlockFace? = null,
     ) {
         if (!settings.worldEnabled(player.world.name)) {
             restoreSpeed(player)
@@ -214,9 +223,17 @@ open class TrailsPlugin : JavaPlugin() {
         val canCreate =
             if (settings.usePermissionForTrails) player.hasPermission("trails.create-trails") else trailsEnabled(player.uniqueId)
         if (!canCreate) return
-        trailService.walk(player, movementContext, settings.runModifier) { target ->
-            checkEventProtection(player, block, target)
-        }
+        val result =
+            trailService.walk(
+                player = player,
+                context = movementContext,
+                sprintModifier = settings.runModifier,
+                popularThreshold = settings.popularRoutes.terminalWalks.takeIf { settings.popularRoutes.enabled },
+                wideningDirection = movementDirection,
+            ) { targetBlock, target ->
+                checkEventProtection(player, targetBlock, target)
+            }
+        trailFeedback.onWalk(player, block, result)
     }
 
     fun captureRoadMovement(
@@ -303,9 +320,11 @@ open class TrailsPlugin : JavaPlugin() {
         val context = trailService.movementContext(block)
         if (!trailService.canAffect(context)) return
         val bypass = player.hasPermission("trails.trail-tool.bypass-protection")
-        trailService.walk(player, context, settings.runModifier, forced = true) { target ->
-            bypass || checkEventProtection(player, block, target)
-        }
+        val result =
+            trailService.walk(player, context, settings.runModifier, forced = true) { targetBlock, target ->
+                bypass || checkEventProtection(player, targetBlock, target)
+            }
+        trailFeedback.onWalk(player, block, result)
     }
 
     fun decayBlock(block: Block): Boolean =
@@ -322,15 +341,77 @@ open class TrailsPlugin : JavaPlugin() {
     fun inspectTrail(block: Block): TrailBlockState? = trailService.inspect(block)
 
     fun showTrailInfo(player: Player, block: Block) {
-        val state = inspectTrail(block)
+        val inspection = trailService.inspection(block)
+        if (!player.isSneaking) {
+            trailFeedback.inspect(player, inspection)
+            return
+        }
+        if (inspection == null) {
+            message(player, "messages.trail-info-empty")
+            return
+        }
         message(
             player,
             "messages.trail-info",
             mapOf(
-                "%walks%" to (state?.walks ?: 0).toString(),
-                "%trail%" to (state?.identity?.serialize() ?: "—"),
+                "%walks%" to inspection.walks.toString(),
+                "%required%" to (inspection.next?.let { inspection.stage.requiredWalks.toString() } ?: "—"),
+                "%trail%" to inspection.stage.identity.serialize(),
             ),
         )
+    }
+
+    fun debugInspect(block: Block): String {
+        val context = trailService.movementContext(block)
+        val state = context.stored
+        val inspection = trailService.inspection(block)
+        val stage = inspection?.stage ?: context.stage
+        val next = inspection?.next ?: stage?.let(trailService::next)
+        return listOf(
+            "TRAILS_DEBUG",
+            "action=inspect",
+            "world=${block.world.name}",
+            "x=${block.x}",
+            "y=${block.y}",
+            "z=${block.z}",
+            "material=${block.type.name}",
+            "biome=${block.biome.key}",
+            "tracked=${state != null}",
+            "trail=${stage?.trailName ?: "-"}",
+            "stage=${stage?.index ?: -1}",
+            "walks=${state?.walks ?: 0}",
+            "required=${next?.let { stage?.requiredWalks } ?: -1}",
+            "next=${next?.material ?: "-"}",
+            "terminal=${stage != null && next == null}",
+            "decay_edge=${state != null && trailService.isDecayEdge(block)}",
+        ).joinToString(" ")
+    }
+
+    fun debugPulse(
+        player: Player,
+        count: Int,
+    ): String {
+        require(count in 1..100) { "debug pulse count must be between 1 and 100" }
+        val block = player.location.clone().subtract(0.0, 0.1, 0.0).block
+        repeat(count) {
+            handleMovement(player, block, createTrail = true, movementDirection = facingFromYaw(player.location.yaw))
+        }
+        return debugInspect(block).replaceFirst("action=inspect", "action=pulse pulses=$count")
+    }
+
+    fun debugDecay(block: Block): String {
+        val changed = decayBlock(block)
+        return debugInspect(block).replaceFirst("action=inspect", "action=decay changed=$changed")
+    }
+
+    private fun facingFromYaw(yaw: Float): BlockFace {
+        val normalized = ((yaw % 360F) + 360F) % 360F
+        return when {
+            normalized < 45F || normalized >= 315F -> BlockFace.SOUTH
+            normalized < 135F -> BlockFace.WEST
+            normalized < 225F -> BlockFace.NORTH
+            else -> BlockFace.EAST
+        }
     }
 
     fun createTool(kind: TrailToolKind): ItemStack {
@@ -443,6 +524,7 @@ open class TrailsPlugin : JavaPlugin() {
         settings = newSettings
         locale = newLocale
         trailService = newTrailService
+        trailFeedback = TrailFeedback(newSettings.feedback, newLocale)
     }
 
     private fun createObserver(settings: TrailsSettings): BlockChangeObserver {

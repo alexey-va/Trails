@@ -26,7 +26,7 @@ class LegacyConfigMigratorTest :
                 Files.readString(folder.resolve("config.v1.backup.yml")) shouldBe legacy
                 Files.readString(folder.resolve("players.yml")) shouldBe playerDataBefore
                 val migrated = loadV2(folder)
-                migrated.configVersion shouldBe 3
+                migrated.configVersion shouldBe 4
                 migrated.trailsConfigVersion shouldBe 1
                 migrated.commandAlias shouldBe "footpaths"
                 migrated.worldMode shouldBe WorldMode.ALLOWLIST
@@ -92,7 +92,7 @@ class LegacyConfigMigratorTest :
             }
         }
 
-        "migrates v2 to v3 while preserving active behavior and dropping adapter configuration" {
+        "migrates v2 to the current schema while preserving active behavior and dropping adapter configuration" {
             val folder = Files.createTempDirectory("trails-migration-v2-")
             try {
                 val bundledConfig =
@@ -100,7 +100,7 @@ class LegacyConfigMigratorTest :
                         .bufferedReader().use { it.readText() }
                 val v2 =
                     bundledConfig
-                        .replace("config-version: 3", "config-version: 2")
+                        .replace("config-version: 4", "config-version: 2")
                         .replace("locale: en-US", "locale: ru-RU")
                         .replace("    log-block-changes: true", "    log-block-changes: false")
                         .replace(
@@ -118,7 +118,7 @@ class LegacyConfigMigratorTest :
                 result.backup?.fileName.toString() shouldBe "config.v2.backup.yml"
                 Files.readString(folder.resolve("config.v2.backup.yml")) shouldBe v2
                 val migrated = loadV2(folder)
-                migrated.configVersion shouldBe 3
+                migrated.configVersion shouldBe 4
                 migrated.language shouldBe "ru-RU"
                 migrated.integrations.coreProtectChanges shouldBe false
                 YamlConfig(folder, "config.yml").existsExplicitly("integrations.towny") shouldBe false
@@ -129,7 +129,23 @@ class LegacyConfigMigratorTest :
     }) {
     companion object {
         private val materials =
-            setOf("GRASS_BLOCK", "DIRT", "COARSE_DIRT", "DIRT_PATH", "SAND", "SANDSTONE", "IRON_SHOVEL", "STICK")
+            setOf(
+                "GRASS_BLOCK",
+                "DIRT",
+                "COARSE_DIRT",
+                "DIRT_PATH",
+                "ROOTED_DIRT",
+                "PODZOL",
+                "MOSS_BLOCK",
+                "SAND",
+                "SANDSTONE",
+                "STONE",
+                "ANDESITE",
+                "GRAVEL",
+                "COBBLESTONE",
+                "IRON_SHOVEL",
+                "STICK",
+            )
 
         private fun migrator(folder: java.nio.file.Path) =
             LegacyConfigMigrator(

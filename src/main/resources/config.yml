@@ -1,6 +1,6 @@
 # Trails configuration.
 # Every duration and percentage includes its unit in the key.
-config-version: 3
+config-version: 4
 
 locale: en-US
 
@@ -23,6 +23,19 @@ trail-creation:
   require-permission: false
   strict-stage-order: false
   visualization-particle: NAUTILUS
+  popular-routes:
+    # A fully worn one-block trail can add one shoulder on each side, never widening beyond three blocks.
+    enabled: true
+    widening-walks: 24
+  feedback:
+    progress-particles:
+      enabled: true
+      milestones-percent: [25, 50, 75]
+      count: 3
+    stage-change-sound:
+      enabled: true
+      volume: 0.35
+      pitch: 1.15
 
 speed-boost:
   require-permission: false
@@ -44,6 +57,10 @@ decay:
   blocks-per-chunk-percent: 3
   minimum-player-distance-blocks: 5
   step-counter-reduction-percent: 10
+  # The timer starts conservatively when a tracked block is first observed after startup.
+  minimum-idle-minutes: 180
+  # Prefer route ends instead of erasing random isolated spots along a trail.
+  edge-first: true
 
 messages:
   protection-denied:

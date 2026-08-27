@@ -15,7 +15,7 @@ Claim plugins are supported through cancellable Bukkit events instead of private
 
 ## Configuration
 
-Trails 2.2 uses three versioned operator files:
+Trails 2.3 uses three versioned operator files:
 
 - `config.yml` contains gameplay, world, storage, command, and integration settings.
 - `trails.yml` contains structured, weighted trail definitions and their stages.
@@ -26,9 +26,10 @@ chunk and should not be renamed casually.
 
 When a 1.9 `config.yml` is detected, Trails validates it completely, writes `config.v1.backup.yml`, generates the
 current files through temporary files, validates the generated result, and replaces `config.yml` last. Schema v2 is
-likewise migrated to v3 with `config.v2.backup.yml`; obsolete plugin-specific adapter settings are intentionally
-dropped. A failed migration leaves the old file untouched. `players.yml` is never rewritten by the config migrator.
-Legacy per-block `trails:w` / `trails:n` data is intentionally not read or migrated; Trails 2.2 starts block progress
+likewise migrated to the current schema with `config.v2.backup.yml`; obsolete plugin-specific adapter settings are intentionally
+dropped. For versioned current-generation configs, missing bundled keys are merged forward once without overwriting
+operator values or removing unknown keys. A failed migration leaves the old file untouched. `players.yml` is never rewritten by the config migrator.
+Legacy per-block `trails:w` / `trails:n` data is intentionally not read or migrated; Trails 2.3 starts block progress
 in a compact checksum-protected chunk-PDC v1 store.
 
 Bundled locales use MiniMessage. Existing locale files without a `format` key continue to use legacy ampersand
@@ -42,6 +43,9 @@ Useful operator commands:
 - `/trails status` shows schema versions, world scope, loaded definitions, and integration state.
 - `/trails give inspect [player]` gives the tagged inspection stick.
 - `/trails give advance [player]` gives the tagged trail-advance shovel.
+- `/trails debug inspect [world x y z]` prints stable trail, biome, stage, progress, and decay-edge fields.
+- `/trails debug pulse <count> [player]` applies 1–100 real movement samples through the target player's normal gates.
+- `/trails debug decay [world x y z]` exercises one protected natural-decay step.
 - `/trails build list [profile]` shows localized descriptions for all road profiles or one selected profile.
 - `/trails build start <profile> [player]` starts a client-only road preview while the player walks.
 - `/trails build commit [player]`, `cancel`, `status`, and `undo` manage the bounded road plan.
@@ -50,6 +54,14 @@ Giving tools requires `trails.tools.give` (operator by default). Only items issu
 persistent tag and activate the listeners, so ordinary sticks and shovels are ignored. Tagged tools can be used by
 players with `trails.info-tool` or `trails.trail-tool`; both are granted by default, while protection checks remain
 active for the advance tool.
+
+Natural trails can be scoped to worlds and biomes. The bundled catalog includes meadow, forest, mossy, sandy, and
+rocky variants plus a universal fallback, while a persisted trail identity always wins over later environment
+selection. Configurable 25/50/75% milestones emit a few player-only block particles, and a quiet gravel step marks a
+stage transition without sending chat. The inspection tool shows a compact localized action bar; sneak while using it
+for detailed chat output. Fully worn routes can add one protected shoulder on each side after sustained terminal-stage
+traffic, but never spread beyond three blocks. Decay waits for a long inactivity window, starts conservatively after a
+restart, and prefers route ends before falling back to closed routes.
 
 Before a player-caused material transition, Trails fires a cancellable `EntityChangeBlockEvent` with the exact target
 material. By default it follows with a compatibility `BlockPlaceEvent` for claim plugins that only guard conventional
@@ -119,7 +131,7 @@ while every road block still exactly matches the committed snapshot, so it canno
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.2.6.jar`.
+The deployable JAR is written to `build/libs/Trails-2.3.0.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

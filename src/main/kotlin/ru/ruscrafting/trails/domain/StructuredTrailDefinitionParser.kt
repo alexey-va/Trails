@@ -51,9 +51,49 @@ class StructuredTrailDefinitionParser(
             rawStages.mapIndexedNotNull { index, rawStage ->
                 parseStage(name, index, rawStages.size, rawStage, problems)
             }
-        if (stages.size != rawStages.size || (rawWeight != null && rawWeight.intOrNull() == null) || weight <= 0) return null
-        return TrailDefinition(name, stages, weight)
+        val conditions = parseConditions(path, definition["conditions"], problems)
+        if (stages.size != rawStages.size || (rawWeight != null && rawWeight.intOrNull() == null) || weight <= 0 || conditions == null) {
+            return null
+        }
+        return TrailDefinition(name, stages, weight, conditions)
     }
+
+    private fun parseConditions(
+        path: String,
+        rawConditions: Any?,
+        problems: MutableList<String>,
+    ): TrailConditions? {
+        if (rawConditions == null) return TrailConditions()
+        val conditions = rawConditions.stringMapOrNull()
+        if (conditions == null) {
+            problems += "$path.conditions must be a map"
+            return null
+        }
+        val unknown = conditions.keys - setOf("worlds", "biomes")
+        if (unknown.isNotEmpty()) problems += "$path.conditions contains unknown keys: ${unknown.sorted().joinToString(", ")}"
+        val worlds = parseStringSet("$path.conditions.worlds", conditions["worlds"], problems) { it.lowercase() }
+        val biomes = parseStringSet("$path.conditions.biomes", conditions["biomes"], problems, ::normalizeBiome)
+        if (unknown.isNotEmpty() || worlds == null || biomes == null) return null
+        return TrailConditions(worlds, biomes)
+    }
+
+    private fun parseStringSet(
+        path: String,
+        raw: Any?,
+        problems: MutableList<String>,
+        normalize: (String) -> String,
+    ): Set<String>? {
+        if (raw == null) return emptySet()
+        val values = raw as? Collection<*>
+        if (values == null || values.any { it !is String || it.isBlank() }) {
+            problems += "$path must be a list of non-blank strings"
+            return null
+        }
+        return values.map { normalize((it as String).trim()) }.toCollection(linkedSetOf())
+    }
+
+    private fun normalizeBiome(value: String): String =
+        value.lowercase().let { if (':' in it) it else "minecraft:$it" }
 
     private fun parseStage(
         trailName: String,

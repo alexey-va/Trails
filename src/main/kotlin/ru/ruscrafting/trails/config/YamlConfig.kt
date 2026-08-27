@@ -34,6 +34,7 @@ class YamlConfig(
                     // Preserve literal dots while SnakeYAML turns maps into Bukkit
                     // sections, then restore normal dotted path lookups.
                     configuration.options().pathSeparator('\u0000')
+                    configuration.options().parseComments(true)
                     configuration.load(file.toFile())
                     configuration.options().pathSeparator('.')
                 }
@@ -111,6 +112,41 @@ class YamlConfig(
         lock.write { yaml.set(path, value) }
     }
 
+    /**
+     * Adds only bundled leaf values that are absent from the operator file.
+     * Existing values and unknown keys remain untouched. The optional schema
+     * version is advanced only from an older supported integer.
+     */
+    fun mergeBundledDefaults(
+        versionPath: String? = null,
+        targetVersion: Int? = null,
+    ): Set<String> {
+        val defaults = bundledDefaults ?: return emptySet()
+        val added = linkedSetOf<String>()
+        lock.write {
+            defaults.getKeys(true)
+                .filterNot(defaults::isConfigurationSection)
+                .forEach { path ->
+                    if (path !in explicitPaths && explicitScalarAncestor(path) == null) {
+                        yaml.set(path, defaults.get(path).toYamlValue())
+                        added += path
+                    }
+                }
+            if (versionPath != null && targetVersion != null) {
+                val current = yaml.get(versionPath).integerOrNull()
+                if (current != null && current < targetVersion) {
+                    yaml.set(versionPath, targetVersion)
+                    added += versionPath
+                }
+            }
+        }
+        if (added.isNotEmpty()) {
+            saveStrict()
+            reload()
+        }
+        return added
+    }
+
     fun saveStrict() {
         val serialized = lock.read { yaml.saveToString() }
         val target = folder.resolve(relativePath)
@@ -129,6 +165,22 @@ class YamlConfig(
     }
 
     private fun number(path: String): Number? = lock.read { yaml.get(path) as? Number }
+
+    private fun explicitScalarAncestor(path: String): String? {
+        var ancestor = path.substringBeforeLast('.', missingDelimiterValue = "")
+        while (ancestor.isNotEmpty()) {
+            if (ancestor in explicitPaths && !yaml.isConfigurationSection(ancestor)) return ancestor
+            ancestor = ancestor.substringBeforeLast('.', missingDelimiterValue = "")
+        }
+        return null
+    }
+
+    private fun Any?.integerOrNull(): Int? =
+        when (this) {
+            is Number -> toDouble().takeIf { it.isFinite() && it % 1.0 == 0.0 }?.toInt()
+            is String -> trim().toIntOrNull()
+            else -> null
+        }
 
     private fun Any?.toYamlValue(): Any? =
         when (this) {

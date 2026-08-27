@@ -36,6 +36,10 @@ data class TrailsSettings(
     val decayTimer: Long,
     val decayDistance: Double,
     val stepDecayFraction: Double,
+    val decayMinimumIdleMinutes: Long,
+    val decayEdgeFirst: Boolean,
+    val popularRoutes: PopularRoutesSettings,
+    val feedback: TrailFeedbackSettings,
     val strictLinks: Boolean,
     val trailParticle: String,
     val worldMode: WorldMode,
@@ -70,12 +74,26 @@ data class IntegrationSettings(
     val coreProtectChanges: Boolean,
 )
 
+data class PopularRoutesSettings(
+    val enabled: Boolean,
+    val terminalWalks: Int,
+)
+
+data class TrailFeedbackSettings(
+    val progressParticlesEnabled: Boolean,
+    val progressMilestonesPercent: Set<Int>,
+    val progressParticleCount: Int,
+    val stageSoundEnabled: Boolean,
+    val stageSoundVolume: Float,
+    val stageSoundPitch: Float,
+)
+
 class TrailsSettingsException(
     val problems: List<String>,
 ) : IllegalArgumentException(problems.joinToString(separator = "\n"))
 
 object TrailsSettingsLoader {
-    const val CONFIG_VERSION = 3
+    const val CONFIG_VERSION = 4
     const val TRAILS_CONFIG_VERSION = 1
     private val COMMAND_ALIAS = Regex("[a-z0-9_-]+")
 
@@ -150,6 +168,53 @@ object TrailsSettingsLoader {
                 decayTimer = boundedPositiveLong(config, "decay.interval-ticks", 1200L, MAX_TICK_INTERVAL, problems),
                 decayDistance = doubleInRange(config, "decay.minimum-player-distance-blocks", 5.0, 0.0..128.0, problems),
                 stepDecayFraction = percent(config, "decay.step-counter-reduction-percent", 10.0, problems),
+                decayMinimumIdleMinutes =
+                    boundedPositiveLong(config, "decay.minimum-idle-minutes", 180L, MAX_IDLE_MINUTES, problems),
+                decayEdgeFirst = boolean(config, "decay.edge-first", true, problems),
+                popularRoutes =
+                    PopularRoutesSettings(
+                        enabled = boolean(config, "trail-creation.popular-routes.enabled", true, problems),
+                        terminalWalks =
+                            boundedPositiveInt(config, "trail-creation.popular-routes.widening-walks", 24, 100_000, problems),
+                    ),
+                feedback =
+                    TrailFeedbackSettings(
+                        progressParticlesEnabled =
+                            boolean(config, "trail-creation.feedback.progress-particles.enabled", true, problems),
+                        progressMilestonesPercent =
+                            milestonePercentages(
+                                config,
+                                "trail-creation.feedback.progress-particles.milestones-percent",
+                                setOf(25, 50, 75),
+                                problems,
+                            ),
+                        progressParticleCount =
+                            boundedPositiveInt(
+                                config,
+                                "trail-creation.feedback.progress-particles.count",
+                                3,
+                                32,
+                                problems,
+                            ),
+                        stageSoundEnabled =
+                            boolean(config, "trail-creation.feedback.stage-change-sound.enabled", true, problems),
+                        stageSoundVolume =
+                            doubleInRange(
+                                config,
+                                "trail-creation.feedback.stage-change-sound.volume",
+                                0.35,
+                                0.0..2.0,
+                                problems,
+                            ).toFloat(),
+                        stageSoundPitch =
+                            doubleInRange(
+                                config,
+                                "trail-creation.feedback.stage-change-sound.pitch",
+                                1.15,
+                                0.5..2.0,
+                                problems,
+                            ).toFloat(),
+                    ),
                 strictLinks = boolean(config, "trail-creation.strict-stage-order", false, problems),
                 trailParticle = particle,
                 worldMode = worldMode,
@@ -187,6 +252,47 @@ object TrailsSettingsLoader {
     private const val MAX_TICK_INTERVAL = 12_096_000L
     private const val MAX_COOLDOWN_SECONDS = 86_400L
     private const val MAX_SAVE_INTERVAL_MINUTES = 1_440L
+    private const val MAX_IDLE_MINUTES = 43_200L
+
+    private fun boundedPositiveInt(
+        config: YamlConfig,
+        path: String,
+        default: Int,
+        maximum: Int,
+        problems: MutableList<String>,
+    ): Int {
+        val value = integer(config, path, default.toLong(), problems)
+        if (value <= 0) problems += "$path must be positive"
+        if (value > maximum) problems += "$path must not exceed $maximum"
+        return value.coerceIn(1, maximum.toLong()).toInt()
+    }
+
+    private fun milestonePercentages(
+        config: YamlConfig,
+        path: String,
+        default: Set<Int>,
+        problems: MutableList<String>,
+    ): Set<Int> {
+        val raw = config.value(path) ?: return default
+        val values = raw as? Collection<*>
+        if (values == null) {
+            problems += "$path must be a list of whole percentages between 1 and 99"
+            return default
+        }
+        val parsed =
+            values.mapNotNull { value ->
+                when (value) {
+                    is Number -> value.toDouble().takeIf { it.isFinite() && it % 1.0 == 0.0 }?.toInt()
+                    is String -> value.trim().toIntOrNull()
+                    else -> null
+                }
+            }
+        if (parsed.size != values.size || parsed.any { it !in 1..99 } || parsed.toSet().size != parsed.size) {
+            problems += "$path must contain unique whole percentages between 1 and 99"
+            return default
+        }
+        return parsed.toSortedSet()
+    }
 
     private fun itemMaterial(
         path: String,
@@ -380,6 +486,18 @@ object LegacyTrailsSettingsLoader {
                 decayTimer = boundedPositiveLong("General.decay-timer", 1200L, MAX_TICK_INTERVAL),
                 decayDistance = doubleInRange("General.decay-distance", 5.0, 0.0..128.0),
                 stepDecayFraction = doubleInRange("General.step-decay-fraction", 0.1, 0.0..1.0),
+                decayMinimumIdleMinutes = 180L,
+                decayEdgeFirst = true,
+                popularRoutes = PopularRoutesSettings(enabled = true, terminalWalks = 24),
+                feedback =
+                    TrailFeedbackSettings(
+                        progressParticlesEnabled = true,
+                        progressMilestonesPercent = setOf(25, 50, 75),
+                        progressParticleCount = 3,
+                        stageSoundEnabled = true,
+                        stageSoundVolume = 0.35F,
+                        stageSoundPitch = 1.15F,
+                    ),
                 strictLinks = config.boolean("General.strict-links", false),
                 trailParticle = particle,
                 worldMode = if (allWorlds) WorldMode.ALL else WorldMode.ALLOWLIST,

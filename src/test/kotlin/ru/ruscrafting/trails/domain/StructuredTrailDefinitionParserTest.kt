@@ -93,4 +93,41 @@ class StructuredTrailDefinitionParserTest :
             error.problems shouldContain "trails.DirtPath.stages[0].count-chance-percent must be between 0 and 100"
             error.problems shouldContain "trails.DirtPath.stages[0].speed-multiplier must be between 0 and 5"
         }
+
+        "normalizes optional world and biome conditions" {
+            val definition =
+                parser.parse(
+                    mapOf(
+                        "DirtPath" to
+                            mapOf(
+                                "conditions" to
+                                    mapOf(
+                                        "worlds" to listOf("Survival"),
+                                        "biomes" to listOf("forest", "minecraft:taiga"),
+                                    ),
+                                "stages" to listOf(mapOf("material" to "DIRT_PATH")),
+                            ),
+                    ),
+                ).single()
+
+            definition.conditions.worlds shouldBe setOf("survival")
+            definition.conditions.biomes shouldBe setOf("minecraft:forest", "minecraft:taiga")
+        }
+
+        "rejects malformed condition lists without dropping the definition silently" {
+            val error =
+                shouldThrow<TrailDefinitionException> {
+                    parser.parse(
+                        mapOf(
+                            "DirtPath" to
+                                mapOf(
+                                    "conditions" to mapOf("biomes" to "forest"),
+                                    "stages" to listOf(mapOf("material" to "DIRT_PATH")),
+                                ),
+                        ),
+                    )
+                }
+
+            error.problems shouldContain "trails.DirtPath.conditions.biomes must be a list of non-blank strings"
+        }
     })

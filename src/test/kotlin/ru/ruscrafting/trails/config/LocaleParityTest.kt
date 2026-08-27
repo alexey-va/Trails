@@ -23,6 +23,10 @@ class LocaleParityTest :
                 chinese.keys("roadProfiles") shouldContainExactlyInAnyOrder english.keys("roadProfiles")
                 russian.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
                 chinese.keys("tools") shouldContainExactlyInAnyOrder english.keys("tools")
+                russian.keys("actionbar") shouldContainExactlyInAnyOrder english.keys("actionbar")
+                chinese.keys("actionbar") shouldContainExactlyInAnyOrder english.keys("actionbar")
+                russian.keys("trailNames") shouldContainExactlyInAnyOrder english.keys("trailNames")
+                chinese.keys("trailNames") shouldContainExactlyInAnyOrder english.keys("trailNames")
                 val roads = RoadSettingsLoader.load(YamlConfig(folder, "roads.yml"))
                 english.keys("roadProfiles") shouldContainExactlyInAnyOrder roads.profiles.keys
 

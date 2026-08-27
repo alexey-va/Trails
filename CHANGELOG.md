@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.3.0 — 2026-08-27
+
+### Added
+
+- Select natural trail styles by biome, with bundled meadow, forest, moss, sand, rocky, and universal fallback paths.
+- Show subtle progress particles at configurable milestones and play a quiet sound when a trail advances, without chat spam.
+- Show a localized ten-segment progress bar with the tagged inspector; sneaking keeps detailed chat output.
+- Widen fully worn popular routes to one protected pair of shoulders, capped at three blocks total.
+- Delay natural decay until a configurable inactivity window and prefer route ends without making closed routes permanent.
+- Add bounded `/trails debug inspect|pulse|decay` commands for players and console under the operator-only `trails.debug` permission.
+
+### Compatibility
+
+- Merge newly bundled `config.yml` keys into existing installations once, preserving operator values and unknown keys.
+- Keep existing tracked trail identities stable when a biome or definition selection context changes.
+
 ## 2.2.6 — 2026-08-27
 
 ### Fixed

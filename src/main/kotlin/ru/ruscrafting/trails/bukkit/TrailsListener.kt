@@ -1,6 +1,8 @@
 package ru.ruscrafting.trails.bukkit
 
 import org.bukkit.Material
+import org.bukkit.Location
+import org.bukkit.block.BlockFace
 import org.bukkit.entity.Player
 import org.bukkit.event.Event
 import org.bukkit.event.EventHandler
@@ -27,6 +29,7 @@ import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.event.world.StructureGrowEvent
 import org.bukkit.inventory.EquipmentSlot
 import ru.ruscrafting.trails.TrailsPlugin
+import kotlin.math.abs
 
 class TrailsListener(
     private val plugin: TrailsPlugin,
@@ -42,7 +45,12 @@ class TrailsListener(
         }
         val capturingRoad = plugin.captureRoadMovement(event.player, to)
         if (event.player.isFlying) return
-        plugin.handleMovement(event.player, from.clone().subtract(0.0, 0.1, 0.0).block, createTrail = !capturingRoad)
+        plugin.handleMovement(
+            event.player,
+            from.clone().subtract(0.0, 0.1, 0.0).block,
+            createTrail = !capturingRoad,
+            movementDirection = horizontalDirection(from, to),
+        )
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -153,5 +161,16 @@ class TrailsListener(
     fun onTeleport(event: PlayerTeleportEvent) {
         plugin.discardRoadSession(event.player)
         plugin.restoreSpeed(event.player)
+    }
+
+    private fun horizontalDirection(from: Location, to: Location): BlockFace? {
+        val x = to.x - from.x
+        val z = to.z - from.z
+        if (x == 0.0 && z == 0.0) return null
+        return if (abs(x) >= abs(z)) {
+            if (x >= 0.0) BlockFace.EAST else BlockFace.WEST
+        } else {
+            if (z >= 0.0) BlockFace.SOUTH else BlockFace.NORTH
+        }
     }
 }

@@ -13,8 +13,10 @@ import org.bukkit.Location
 import org.bukkit.GameMode
 import org.bukkit.NamespacedKey
 import org.bukkit.block.BlockFace
+import org.bukkit.block.Block
 import org.bukkit.block.data.type.Slab
 import org.bukkit.block.data.type.Stairs
+import org.bukkit.block.Biome
 import org.bukkit.event.Event
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -87,11 +89,15 @@ class TrailsPluginIntegrationTest :
             regularRoutes shouldContain "boost"
             regularRoutes shouldNotContain "reload"
             regularRoutes shouldNotContain "build"
+            regularRoutes shouldNotContain "debug"
             regularRoutes shouldNotContain "road"
+            server.getCommandTabComplete(regular, "trails debug inspect ") shouldBe emptyList()
+            server.getCommandTabComplete(regular, "trails debug pulse 5 ") shouldBe emptyList()
 
             val adminRoutes = server.getCommandTabComplete(admin, "trails ")
             adminRoutes shouldContain "reload"
             adminRoutes shouldContain "build"
+            adminRoutes shouldContain "debug"
             adminRoutes shouldNotContain "road"
             server.getCommandTabComplete(admin, "trails build start ") shouldContain "rustic"
             server.getCommandTabComplete(admin, "trails build list ") shouldContain "forest_walk"
@@ -197,11 +203,12 @@ class TrailsPluginIntegrationTest :
         "five successful walks advance the default DirtPath and preserve block state" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("Walker")
-            val block = world.getBlockAt(0, 64, 0)
-            block.type = Material.GRASS_BLOCK
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            plugin.debugInspect(block) shouldContain "trail=DirtPath"
 
             repeat(5) { plugin.handleMovement(player, block) }
 
+            plugin.debugInspect(block) shouldContain "stage=1 walks=0"
             block.type shouldBe Material.DIRT
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
             plugin.inspectTrail(block)?.walks shouldBe 0
@@ -218,12 +225,27 @@ class TrailsPluginIntegrationTest :
             ) shouldBe true
         }
 
+        "a plains surface selects the biome-specific MeadowPath" {
+            val world = server.addSimpleWorld("meadow_world")
+            val player = server.addPlayer("MeadowWalker")
+            val block = world.getBlockAt(0, 64, 0).also {
+                it.type = Material.GRASS_BLOCK
+                it.biome = Biome.PLAINS
+            }
+            plugin.debugInspect(block) shouldContain "trail=MeadowPath"
+
+            repeat(6) { plugin.handleMovement(player, block) }
+
+            block.type shouldBe Material.DIRT
+            plugin.inspectTrail(block) shouldBe TrailBlockState(TrailIdentity("MeadowPath", 1), 0)
+        }
+
         "the registered movement listener adapts block changes into trail progress" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("EventWalker")
             val from = Location(world, 0.5, 65.0, 0.5)
             val to = Location(world, 1.5, 65.0, 0.5)
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             player.teleport(from)
 
             repeat(5) {
@@ -239,7 +261,7 @@ class TrailsPluginIntegrationTest :
             val player = server.addPlayer("CancelledWalker")
             val from = Location(world, 0.5, 65.0, 0.5)
             val to = Location(world, 1.5, 65.0, 0.5)
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             player.teleport(from)
 
             repeat(5) {
@@ -254,7 +276,7 @@ class TrailsPluginIntegrationTest :
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("BoostedWalker")
             val location = Location(world, 0.5, 65.0, 0.5)
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             player.teleport(location)
             player.walkSpeed = 0.2F
             plugin.forceTrail(player, block)
@@ -279,7 +301,7 @@ class TrailsPluginIntegrationTest :
         "bukkit-event protection fires only for the material transition and respects cancellation" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("ProtectedWalker")
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             var changeCalls = 0
             var placeCalls = 0
             val listener = object : Listener {}
@@ -328,7 +350,7 @@ class TrailsPluginIntegrationTest :
         "bukkit-event protection treats canBuild false as a veto" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("BuildDeniedWalker")
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             val listener = object : Listener {}
             server.pluginManager.registerEvent(
                 BlockPlaceEvent::class.java,
@@ -348,7 +370,7 @@ class TrailsPluginIntegrationTest :
         "creation respects the personal toggle, sneak bypass, and enabled worlds" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("CarefulWalker")
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
 
             plugin.setTrailsEnabled(player.uniqueId, false)
             repeat(5) { plugin.handleMovement(player, block) }
@@ -375,7 +397,7 @@ class TrailsPluginIntegrationTest :
         "permission-gated creation requires trails.create-trails" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("PermittedWalker")
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             val configPath = plugin.dataFolder.toPath().resolve("config.yml")
             Files.writeString(
                 configPath,
@@ -397,7 +419,7 @@ class TrailsPluginIntegrationTest :
         "permission-gated boost requires trails.boost" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("BoostPermissionWalker")
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             val configPath = plugin.dataFolder.toPath().resolve("config.yml")
             Files.writeString(
                 configPath,
@@ -423,7 +445,7 @@ class TrailsPluginIntegrationTest :
         "the trail tool advances immediately and block breaking clears persisted state" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("Builder")
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
 
             plugin.forceTrail(player, block)
             block.type shouldBe Material.DIRT
@@ -438,7 +460,7 @@ class TrailsPluginIntegrationTest :
             val player = server.addPlayer("PistonWalker")
             val piston = world.getBlockAt(0, 64, 0).also { it.type = Material.STICKY_PISTON }
             val destination = world.getBlockAt(1, 64, 0)
-            val source = world.getBlockAt(2, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val source = world.getBlockAt(2, 64, 0).fallbackGrass()
             plugin.forceTrail(player, source)
             val state = plugin.inspectTrail(source)
 
@@ -453,7 +475,7 @@ class TrailsPluginIntegrationTest :
         "natural material decay fires BlockFadeEvent and respects cancellation" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("DecayGuard")
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
             plugin.forceTrail(player, block)
             block.type shouldBe Material.DIRT
             val listener = object : Listener {}
@@ -475,7 +497,7 @@ class TrailsPluginIntegrationTest :
             val world = server.addSimpleWorld("world")
             val admin = server.addPlayer("ToolAdmin")
             admin.isOp = true
-            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK }
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
 
             val ordinaryInteraction =
                 PlayerInteractEvent(
@@ -522,6 +544,10 @@ class TrailsPluginIntegrationTest :
             server.pluginManager.callEvent(inspectInteraction)
             inspectInteraction.useInteractedBlock() shouldBe Event.Result.DENY
             inspectInteraction.useItemInHand() shouldBe Event.Result.DENY
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextActionBar())).let { actionbar ->
+                actionbar shouldContain "Common trail"
+                actionbar shouldContain "0/5"
+            }
         }
 
         "give command requires permission and can target an online player" {
@@ -535,7 +561,39 @@ class TrailsPluginIntegrationTest :
             target.inventory.contents.filterNotNull().single().let(plugin::toolKind) shouldBe TrailToolKind.INSPECT
         }
 
-        "status and validate commands expose the active v3 configuration" {
+        "debug commands support player-relative and console-coordinate inspection" {
+            val world = server.addSimpleWorld("debug_world")
+            val regular = server.addPlayer("DebugRegular")
+            val admin = server.addPlayer("DebugAdmin").also { it.isOp = true }
+            val block = world.getBlockAt(4, 64, -3).fallbackGrass()
+            admin.teleport(Location(world, 4.5, 65.0, -2.5))
+
+            server.dispatchCommand(regular, "trails debug inspect") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(regular.nextComponentMessage())) shouldContain
+                "permission"
+
+            server.dispatchCommand(admin, "trails debug inspect") shouldBe true
+            val playerInspect = PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage()))
+            playerInspect shouldContain "TRAILS_DEBUG action=inspect"
+            playerInspect shouldContain "world=debug_world"
+            playerInspect shouldContain "x=4 y=64 z=-3"
+
+            server.dispatchCommand(server.consoleSender, "trails debug pulse 5 DebugAdmin") shouldBe true
+            val pulse = PlainTextComponentSerializer.plainText().serialize(checkNotNull(server.consoleSender.nextComponentMessage()))
+            pulse shouldContain "TRAILS_DEBUG action=pulse pulses=5"
+            block.type shouldBe Material.DIRT
+
+            server.dispatchCommand(server.consoleSender, "trails debug inspect debug_world 4 64 -3") shouldBe true
+            val consoleInspect = PlainTextComponentSerializer.plainText().serialize(checkNotNull(server.consoleSender.nextComponentMessage()))
+            consoleInspect shouldContain "trail=DirtPath"
+            consoleInspect shouldContain "stage=1"
+
+            server.dispatchCommand(server.consoleSender, "trails debug pulse 101 DebugAdmin") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(server.consoleSender.nextComponentMessage())) shouldContain
+                "error=count_out_of_range"
+        }
+
+        "status and validate commands expose the active v4 configuration" {
             val admin = server.addPlayer("StatusAdmin")
             admin.isOp = true
 
@@ -1297,3 +1355,9 @@ class TrailsPluginIntegrationTest :
             builder.inventory.contents.filterNotNull().size shouldBe 0
         }
     })
+
+private fun Block.fallbackGrass(): Block =
+    apply {
+        type = Material.GRASS_BLOCK
+        biome = Biome.THE_VOID
+    }

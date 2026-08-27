@@ -18,6 +18,7 @@ class TrailCatalog(
     fun resolve(
         material: String,
         storedIdentity: TrailIdentity?,
+        environment: TrailEnvironment? = null,
     ): TrailStage? {
         val normalized = material.uppercase()
         storedIdentity?.let { identity ->
@@ -29,7 +30,12 @@ class TrailCatalog(
         }
 
         val candidates = byMaterial[normalized].orEmpty()
-        val starts = startsByMaterial[normalized].orEmpty()
+        val matchingStarts =
+            startsByMaterial[normalized].orEmpty().filter { definition ->
+                environment == null || definition.conditions.matches(environment)
+            }
+        val constrainedStarts = matchingStarts.filter { it.conditions.constrained }
+        val starts = constrainedStarts.ifEmpty { matchingStarts.filterNot { it.conditions.constrained } }
         if (starts.isNotEmpty()) return chooseWeighted(starts).stages.first()
         if (strictLinks) return null
         return candidates.minWithOrNull(compareBy(TrailStage::index, TrailStage::trailName))

@@ -33,7 +33,8 @@ messages:
   only-players: '<prefix> <red>This command can only be used by a player.'
   radius-out-of-range: '<prefix> <red>Radius must be between 1 and 128 blocks.'
   reloadFailed: '<prefix> <red>Reload rejected: <error>'
-  trail-info: '<prefix> <yellow>Walks: <white><walks><gray>, <yellow>trail: <white><trail>'
+  trail-info: '<prefix> <gray>Trail: <white><trail><gray>; progress: <white><walks>/<required><gray>.'
+  trail-info-empty: '<prefix> <gray>This block has no accumulated trail wear yet.'
   statusHeader: '<prefix> <gold>Trails <version> status'
   statusConfig: '<gray>Configs: <white>config v<config-version><gray>, trails v<trails-version>, roads v<roads-version>, locale <locale-format>'
   statusWorlds: '<gray>Worlds: <white><worlds>'
@@ -109,4 +110,15 @@ tools:
   inspect:
     label: 'trail inspector'
     name: '<gold>Trail Inspector'
-    lore: '<gray>Right-click a block to show its walk count and trail stage.'
+    lore: '<gray>Right-click: on-screen progress. Sneak + right-click: chat details.'
+actionbar:
+  trailEmpty: '<gray>This block has no trail wear yet'
+  trailProgress: '<gray><trail> <dark_gray>• <bar> <gray><walks>/<required>'
+  trailComplete: '<gray><trail> <dark_gray>• <green>complete'
+trailNames:
+  DirtPath: 'Common trail'
+  MeadowPath: 'Meadow trail'
+  ForestPath: 'Forest trail'
+  MossPath: 'Mossy trail'
+  SandPath: 'Sandy trail'
+  RockyPath: 'Rocky trail'

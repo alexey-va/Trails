@@ -61,4 +61,33 @@ class YamlConfigTest :
                 folder.toFile().deleteRecursively()
             }
         }
+
+        "merge-forward copies missing bundled keys and preserves operator values" {
+            val folder = Files.createTempDirectory("trails-yaml-merge-")
+            try {
+                Files.writeString(
+                    folder.resolve("config.yml"),
+                    """
+                    config-version: 3
+                    locale: ru-RU
+                    speed-boost:
+                      adjustment-step: 0.02
+                    operator-owned:
+                      note: keep-me
+                    """.trimIndent() + "\n",
+                )
+                val config = YamlConfig(folder, "config.yml")
+
+                val added = config.mergeBundledDefaults("config-version", TrailsSettingsLoader.CONFIG_VERSION)
+
+                added.contains("trail-creation.feedback.stage-change-sound.enabled") shouldBe true
+                config.int("config-version") shouldBe TrailsSettingsLoader.CONFIG_VERSION
+                config.double("speed-boost.adjustment-step") shouldBe 0.02
+                config.string("operator-owned.note") shouldBe "keep-me"
+                config.existsExplicitly("trail-creation.feedback.stage-change-sound.enabled") shouldBe true
+                config.mergeBundledDefaults("config-version", TrailsSettingsLoader.CONFIG_VERSION) shouldBe emptySet()
+            } finally {
+                folder.toFile().deleteRecursively()
+            }
+        }
     })

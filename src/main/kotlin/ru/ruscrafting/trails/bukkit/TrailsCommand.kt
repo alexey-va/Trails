@@ -4,7 +4,9 @@ import org.bukkit.command.Command
 import org.bukkit.command.CommandExecutor
 import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
+import org.bukkit.block.Block
 import org.bukkit.entity.Player
+import net.kyori.adventure.text.Component
 import ru.ruscrafting.trails.TrailsPlugin
 import ru.ruscrafting.trails.TrailsPlugin.PlayerTarget
 
@@ -27,6 +29,7 @@ class TrailsCommand(
             "validate" -> validate(sender, args.size)
             "give" -> give(sender, args.drop(1))
             "build" -> buildRoad(sender, args.drop(1))
+            "debug" -> debug(sender, args.drop(1))
             else -> if (args.size == 1) toggleOther(sender, args[0]) else plugin.message(sender, "messages.wrongArgs")
         }
         return true
@@ -50,6 +53,7 @@ class TrailsCommand(
                         if (sender.hasPermission("trails.validate")) add("validate")
                         if (sender.hasPermission("trails.tools.give")) add("give")
                         if (canUseRoads(sender)) add("build")
+                        if (sender.hasPermission(DEBUG_PERMISSION)) add("debug")
                         if (sender.hasPermission("trails.other")) addAll(otherPlayers(sender))
                     }
                 2 ->
@@ -59,6 +63,7 @@ class TrailsCommand(
                         "show" -> listOf("30")
                         "give" -> if (sender.hasPermission("trails.tools.give")) TrailToolKind.entries.map { it.id } else emptyList()
                         "build" -> if (canUseRoads(sender)) listOf("list", "start", "commit", "cancel", "undo", "status") else emptyList()
+                        "debug" -> if (sender.hasPermission(DEBUG_PERMISSION)) listOf("inspect", "pulse", "decay") else emptyList()
                         else -> emptyList()
                     }
                 3 ->
@@ -70,17 +75,25 @@ class TrailsCommand(
                             (args[1].equals("start", true) || args[1].equals("list", true)) -> plugin.roadProfiles().toList()
                         args[0].equals("build", true) && sender.hasPermission(ROADS_MANAGE_PERMISSION) ->
                             plugin.server.onlinePlayers.map(Player::getName)
+                        args[0].equals("debug", true) &&
+                            sender.hasPermission(DEBUG_PERMISSION) &&
+                            args[1].equals("pulse", true) -> listOf("1", "5", "10", "25", "100")
+                        args[0].equals("debug", true) &&
+                            sender.hasPermission(DEBUG_PERMISSION) &&
+                            (args[1].equals("inspect", true) || args[1].equals("decay", true)) ->
+                            plugin.server.worlds.map { it.name }
                         else -> emptyList()
                     }
                 4 ->
-                    if (
+                    when {
                         args[0].equals("build", true) &&
-                        args[1].equals("start", true) &&
-                        sender.hasPermission(ROADS_MANAGE_PERMISSION)
-                    ) {
-                        plugin.server.onlinePlayers.map(Player::getName)
-                    } else {
-                        emptyList()
+                            args[1].equals("start", true) &&
+                            sender.hasPermission(ROADS_MANAGE_PERMISSION) -> plugin.server.onlinePlayers.map(Player::getName)
+                        args[0].equals("debug", true) &&
+                            sender.hasPermission(DEBUG_PERMISSION) &&
+                            args[1].equals("pulse", true) ->
+                            plugin.server.onlinePlayers.map(Player::getName)
+                        else -> emptyList()
                     }
                 else -> emptyList()
             }
@@ -282,6 +295,64 @@ class TrailsCommand(
         }
     }
 
+    private fun debug(sender: CommandSender, args: List<String>) {
+        if (!sender.hasPermission(DEBUG_PERMISSION)) return plugin.message(sender, "messages.noPerm")
+        when (args.firstOrNull()?.lowercase()) {
+            "inspect" -> {
+                val block = debugBlock(sender, args.drop(1)) ?: return
+                sender.sendMessage(Component.text(plugin.debugInspect(block)))
+            }
+            "decay" -> {
+                val block = debugBlock(sender, args.drop(1)) ?: return
+                sender.sendMessage(Component.text(plugin.debugDecay(block)))
+            }
+            "pulse" -> {
+                if (args.size !in 2..3) return plugin.message(sender, "messages.wrongArgs")
+                val count = args.getOrNull(1)?.toIntOrNull()
+                    ?: return sender.sendMessage(Component.text("TRAILS_DEBUG error=invalid_count expected=1..100"))
+                if (count !in 1..100) {
+                    sender.sendMessage(Component.text("TRAILS_DEBUG error=count_out_of_range expected=1..100"))
+                    return
+                }
+                val targetName = args.getOrNull(2)
+                val player =
+                    when {
+                        targetName != null ->
+                            plugin.server.getPlayerExact(targetName)
+                                ?: return sender.sendMessage(Component.text("TRAILS_DEBUG error=player_not_online player=$targetName"))
+                        sender is Player -> sender
+                        else -> return sender.sendMessage(Component.text("TRAILS_DEBUG error=online_player_required"))
+                    }
+                sender.sendMessage(Component.text(plugin.debugPulse(player, count)))
+            }
+            else -> plugin.message(sender, "messages.wrongArgs")
+        }
+    }
+
+    private fun debugBlock(sender: CommandSender, args: List<String>): Block? {
+        if (args.isEmpty()) {
+            val player = sender as? Player
+                ?: run {
+                    sender.sendMessage(Component.text("TRAILS_DEBUG error=coordinates_required syntax=<world> <x> <y> <z>"))
+                    return null
+                }
+            return player.location.clone().subtract(0.0, 0.1, 0.0).block
+        }
+        if (args.size != 4) {
+            plugin.message(sender, "messages.wrongArgs")
+            return null
+        }
+        val world = plugin.server.getWorld(args[0])
+        val x = args[1].toIntOrNull()
+        val y = args[2].toIntOrNull()
+        val z = args[3].toIntOrNull()
+        if (world == null || x == null || y == null || z == null || y !in world.minHeight until world.maxHeight) {
+            sender.sendMessage(Component.text("TRAILS_DEBUG error=invalid_location"))
+            return null
+        }
+        return world.getBlockAt(x, y, z)
+    }
+
     private fun roadTarget(
         sender: CommandSender,
         name: String?,
@@ -311,5 +382,6 @@ class TrailsCommand(
     private companion object {
         const val ROADS_USE_PERMISSION = "trails.roads.use"
         const val ROADS_MANAGE_PERMISSION = "trails.roads.manage"
+        const val DEBUG_PERMISSION = "trails.debug"
     }
 }

@@ -12,6 +12,15 @@ sealed interface ProgressDecision {
         val from: TrailStage,
         val to: TrailStage,
     ) : ProgressDecision
+
+    data class TerminalCounted(
+        val stage: TrailStage,
+        val walks: Int,
+    ) : ProgressDecision
+
+    data class Popular(
+        val stage: TrailStage,
+    ) : ProgressDecision
 }
 
 sealed interface DecayDecision {
@@ -40,14 +49,24 @@ class TrailProgressEngine(
         randomPercent: Double,
         sprintModifier: Double,
         forced: Boolean = false,
+        popularThreshold: Int? = null,
     ): ProgressDecision {
         require(currentWalks >= 0) { "currentWalks must be non-negative" }
         require(randomPercent in 0.0..100.0) { "randomPercent must be between 0 and 100" }
         require(sprintModifier >= 0.0) { "sprintModifier must be non-negative" }
-        val next = catalog.next(stage) ?: return ProgressDecision.NoChange
+        require(popularThreshold == null || popularThreshold > 0) { "popularThreshold must be positive when present" }
+        val next = catalog.next(stage)
+        if (next == null && (popularThreshold == null || forced)) return ProgressDecision.NoChange
         val effectiveChance = (stage.chancePercent * sprintModifier).coerceAtMost(100.0)
         if (!forced && randomPercent > effectiveChance) return ProgressDecision.NoChange
         val walks = currentWalks + 1
+        if (next == null) {
+            return if (walks >= popularThreshold!!) {
+                ProgressDecision.Popular(stage)
+            } else {
+                ProgressDecision.TerminalCounted(stage, walks)
+            }
+        }
         return if (forced || walks >= stage.requiredWalks) {
             ProgressDecision.Advanced(stage, next)
         } else {

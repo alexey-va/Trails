@@ -40,4 +40,30 @@ class TrailCatalogTest :
         "non-strict links retain legacy later-stage discovery" {
             TrailCatalog(definitions, strictLinks = false).resolve("PATH", null) shouldBe second
         }
+
+        "matching biome definitions take priority over the unconditional fallback" {
+            val forest =
+                TrailDefinition(
+                    "Forest",
+                    listOf(TrailStage("Forest", 0, "DIRT", 4, 100.0, 1.0)),
+                    conditions = TrailConditions(biomes = setOf("minecraft:forest")),
+                )
+            val catalog = TrailCatalog(definitions + forest, strictLinks = false, chooseIndex = { 0 })
+
+            catalog.resolve("DIRT", null, TrailEnvironment("world", "minecraft:forest"))?.trailName shouldBe "Forest"
+            catalog.resolve("DIRT", null, TrailEnvironment("world", "minecraft:plains"))?.trailName shouldBe "Dirt"
+        }
+
+        "stored identity remains stable after an environment change" {
+            val forest =
+                TrailDefinition(
+                    "Forest",
+                    listOf(TrailStage("Forest", 0, "DIRT", 4, 100.0, 1.0)),
+                    conditions = TrailConditions(biomes = setOf("minecraft:forest")),
+                )
+            val catalog = TrailCatalog(definitions + forest, strictLinks = false)
+
+            catalog.resolve("DIRT", forest.stages.first().identity, TrailEnvironment("world", "minecraft:desert")) shouldBe
+                forest.stages.first()
+        }
     })

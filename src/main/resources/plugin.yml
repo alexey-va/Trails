@@ -11,7 +11,7 @@ softdepend:
 commands:
   trails:
     description: Configure trail creation and trail speed boost.
-    usage: /trails [on|off|boost|show|reload|status|validate|give|build]
+    usage: /trails [on|off|boost|show|reload|status|validate|give|build|debug]
     aliases: [paths]
 permissions:
   trails.toggle:
@@ -67,4 +67,7 @@ permissions:
     default: op
   trails.roads.collect-drops:
     description: Return ordinary blocks removed by a survival Roads commit.
+    default: op
+  trails.debug:
+    description: Inspect and exercise Trails state for bounded operator QA.
     default: op

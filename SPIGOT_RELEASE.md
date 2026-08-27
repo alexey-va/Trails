@@ -1,6 +1,6 @@
-# Trails 2.2.6
+# Trails 2.3.0
 
-Trails naturally turns frequently walked terrain into configurable paths. The 2.2 line is a production rewrite for modern Paper/Purpur with versioned configuration, safe tagged tools, client-only road previews, crash recovery, and a large bundled road catalog.
+Trails naturally turns frequently walked terrain into configurable paths. Version 2.3 makes those paths feel alive: the surface adapts to its biome, wear has subtle visual feedback, popular routes can become wider, and old routes fade naturally after long inactivity.
 
 ## Requirements
 
@@ -10,7 +10,11 @@ Trails naturally turns frequently walked terrain into configurable paths. The 2.
 
 ## Highlights
 
-- Weighted, multi-stage trails stored per chunk with bounded checksummed data and crash recovery.
+- Biome-aware meadow, forest, mossy, sandy, rocky, and universal fallback trails.
+- Weighted, multi-stage trail progress stored per chunk with bounded checksummed data and crash recovery.
+- Quiet player-only milestone particles, a stage-change sound, and a localized inspector progress bar without chat spam.
+- Popular terminal-stage routes can grow one protected pair of worn shoulders, capped at three blocks total.
+- Edge-first idle decay waits for a configurable quiet period and remains conservative across restarts.
 - Gradual configurable path speed boosts.
 - `/trails give inspect` and `/trails give advance` issue NBT/PDC-tagged tools; ordinary sticks and shovels do nothing.
 - `/trails build start <profile>` records a route and shows a client-only preview before commit.
@@ -29,12 +33,13 @@ Trails naturally turns frequently walked terrain into configurable paths. The 2.
 - `/trails build start <profile> [player]`
 - `/trails build commit|cancel|status|undo [player]`
 - `/trails reload`, `/trails validate`, `/trails status`
+- `/trails debug inspect|pulse|decay` for bounded operator QA from a player or console
 
 See `plugin.yml` for the complete permission list. Roads are disabled by default and must be explicitly enabled and scoped to worlds in `roads.yml`.
 
-## Updating from 1.9
+## Updating
 
-Back up the plugin folder and replace the JAR. Trails validates the legacy configuration, writes a versioned backup, then generates `config.yml`, `trails.yml`, and `roads.yml` atomically. A failed migration leaves the old configuration untouched. Legacy per-block PDC keys are intentionally not imported.
+Back up the plugin folder and replace the JAR. Trails validates legacy configuration and writes versioned backups where a structural migration is required. Existing modern configs are merged forward: newly bundled `config.yml` keys are copied in once, while your values and unknown custom keys are preserved. A failed migration leaves the old configuration untouched. Legacy per-block PDC keys are intentionally not imported.
 
 The old `/trails road` tree has been removed; use `/trails build`. Trail IDs persisted in chunks should not be renamed casually.
 

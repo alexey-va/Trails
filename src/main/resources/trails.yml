@@ -4,7 +4,7 @@ config-version: 1
 trails:
   # IDs are persisted in the owning chunk. Rename an existing ID only when you intend to start a new trail identity.
   DirtPath:
-    # Used when several definitions start from the same material.
+    # Unconditional fallback when no environment-specific trail matches.
     selection-weight: 1
     stages:
       - material: GRASS_BLOCK
@@ -26,6 +26,66 @@ trails:
       - material: DIRT_PATH
         speed-multiplier: 1.3
 
+  MeadowPath:
+    selection-weight: 1
+    conditions:
+      biomes: [plains, sunflower_plains, meadow, cherry_grove, savanna, savanna_plateau]
+    stages:
+      - material: GRASS_BLOCK
+        required-walks: 6
+        count-chance-percent: 100
+        speed-multiplier: 1.0
+      - material: DIRT
+        required-walks: 8
+        count-chance-percent: 90
+        speed-multiplier: 1.1
+      - material: COARSE_DIRT
+        required-walks: 8
+        count-chance-percent: 50
+        speed-multiplier: 1.2
+      - material: DIRT_PATH
+        speed-multiplier: 1.3
+
+  ForestPath:
+    selection-weight: 1
+    conditions:
+      biomes: [forest, flower_forest, birch_forest, dark_forest, old_growth_birch_forest, taiga, old_growth_pine_taiga, old_growth_spruce_taiga, snowy_taiga, windswept_forest, pale_garden]
+    stages:
+      - material: GRASS_BLOCK
+        required-walks: 6
+        count-chance-percent: 100
+        speed-multiplier: 1.0
+      - material: ROOTED_DIRT
+        required-walks: 8
+        count-chance-percent: 85
+        speed-multiplier: 1.08
+      - material: PODZOL
+        required-walks: 10
+        count-chance-percent: 60
+        speed-multiplier: 1.18
+      - material: DIRT_PATH
+        speed-multiplier: 1.3
+
+  MossPath:
+    selection-weight: 1
+    conditions:
+      biomes: [jungle, sparse_jungle, bamboo_jungle, swamp, mangrove_swamp, lush_caves]
+    stages:
+      - material: GRASS_BLOCK
+        required-walks: 6
+        count-chance-percent: 100
+        speed-multiplier: 1.0
+      - material: MOSS_BLOCK
+        required-walks: 8
+        count-chance-percent: 80
+        speed-multiplier: 1.08
+      - material: ROOTED_DIRT
+        required-walks: 10
+        count-chance-percent: 55
+        speed-multiplier: 1.18
+      - material: DIRT_PATH
+        speed-multiplier: 1.3
+
   SandPath:
     selection-weight: 1
     stages:
@@ -36,3 +96,23 @@ trails:
 
       - material: SANDSTONE
         speed-multiplier: 1.3
+
+  RockyPath:
+    selection-weight: 1
+    conditions:
+      biomes: [stony_peaks, jagged_peaks, frozen_peaks, windswept_hills, windswept_gravelly_hills, stony_shore]
+    stages:
+      - material: STONE
+        required-walks: 10
+        count-chance-percent: 75
+        speed-multiplier: 1.0
+      - material: ANDESITE
+        required-walks: 10
+        count-chance-percent: 65
+        speed-multiplier: 1.08
+      - material: GRAVEL
+        required-walks: 8
+        count-chance-percent: 55
+        speed-multiplier: 1.16
+      - material: COBBLESTONE
+        speed-multiplier: 1.25

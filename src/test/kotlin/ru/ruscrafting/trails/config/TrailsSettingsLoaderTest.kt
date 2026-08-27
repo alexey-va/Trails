@@ -8,7 +8,7 @@ import java.nio.file.Files
 
 class TrailsSettingsLoaderTest :
     FreeSpec({
-        "loads the v3 split configuration with event protection and CoreProtect settings" {
+        "loads the v4 split configuration with event protection and CoreProtect settings" {
             val folder = Files.createTempDirectory("trails-settings-")
             try {
                 writeValidConfiguration(folder)
@@ -175,7 +175,7 @@ class TrailsSettingsLoaderTest :
             Files.writeString(
                 folder.resolve("config.yml"),
                 """
-                config-version: 3
+                config-version: 4
                 locale: ru-RU
                 commands:
                   localized-alias: footpaths

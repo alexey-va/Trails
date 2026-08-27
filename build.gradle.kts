@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.2.6"
+version = "2.3.0"
 
 repositories {
     mavenCentral()
@@ -193,7 +193,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         }
         val descriptor = zipTree(jar).matching { include("plugin.yml") }.singleFile.readText()
         check("main: ru.ruscrafting.trails.TrailsPlugin" in descriptor)
-        check("version: \"2.2.6\"" in descriptor)
+        check("version: \"2.3.0\"" in descriptor)
         val notices = zipTree(jar).matching { include("THIRD_PARTY_NOTICES.txt") }.singleFile.readText()
         listOf("Kotlin standard library 2.4.10", "JetBrains Java annotations 13.0", "arc-core and arc-core-paper 2.0.2", "bStats base and Bukkit 3.2.1")
             .forEach { dependency -> check(dependency in notices) { "THIRD_PARTY_NOTICES is missing $dependency" } }

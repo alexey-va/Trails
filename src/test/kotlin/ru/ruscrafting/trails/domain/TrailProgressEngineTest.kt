@@ -34,6 +34,11 @@ class TrailProgressEngineTest :
             engine.walk(path, 100, 0.0, 1.0) shouldBe ProgressDecision.NoChange
         }
 
+        "terminal traffic reaches a bounded popularity threshold when widening is enabled" {
+            engine.walk(path, 0, 0.0, 1.0, popularThreshold = 3) shouldBe ProgressDecision.TerminalCounted(path, 1)
+            engine.walk(path, 2, 0.0, 1.0, popularThreshold = 3) shouldBe ProgressDecision.Popular(path)
+        }
+
         "decay clears the initial stage at zero" {
             engine.decay(grass, 1, 0.1) shouldBe DecayDecision.Cleared
         }

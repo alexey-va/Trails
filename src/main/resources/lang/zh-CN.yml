@@ -33,7 +33,8 @@ messages:
   only-players: '<prefix> <red>此命令只能由玩家使用。'
   radius-out-of-range: '<prefix> <red>半径必须在 1 到 128 格之间。'
   reloadFailed: '<prefix> <red>重新加载被拒绝：<error>'
-  trail-info: '<prefix> <yellow>步数：<white><walks><gray>，<yellow>路径：<white><trail>'
+  trail-info: '<prefix> <gray>路径：<white><trail><gray>；进度：<white><walks>/<required><gray>。'
+  trail-info-empty: '<prefix> <gray>这个方块还没有累积路径磨损。'
   statusHeader: '<prefix> <gold>Trails <version> 状态'
   statusConfig: '<gray>配置：<white>config v<config-version><gray>，trails v<trails-version>，roads v<roads-version>，语言格式 <locale-format>'
   statusWorlds: '<gray>世界：<white><worlds>'
@@ -109,4 +110,15 @@ tools:
   inspect:
     label: '路径检查工具'
     name: '<gold>路径检查工具'
-    lore: '<gray>右键方块：显示步数和路径阶段。'
+    lore: '<gray>右键：屏幕显示进度。潜行 + 右键：聊天栏详情。'
+actionbar:
+  trailEmpty: '<gray>这个方块还没有路径磨损'
+  trailProgress: '<gray><trail> <dark_gray>• <bar> <gray><walks>/<required>'
+  trailComplete: '<gray><trail> <dark_gray>• <green>已完成'
+trailNames:
+  DirtPath: '普通路径'
+  MeadowPath: '草地路径'
+  ForestPath: '森林路径'
+  MossPath: '苔藓路径'
+  SandPath: '沙地路径'
+  RockyPath: '岩石路径'

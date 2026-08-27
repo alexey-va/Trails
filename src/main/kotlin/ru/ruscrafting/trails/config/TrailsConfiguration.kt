@@ -33,6 +33,14 @@ internal class TrailsConfiguration(
             migrationReporter(migration)
             configFile.reload()
         }
+        val addedDefaults =
+            configFile.mergeBundledDefaults(
+                versionPath = "config-version",
+                targetVersion = TrailsSettingsLoader.CONFIG_VERSION,
+            )
+        if (addedDefaults.isNotEmpty()) {
+            migrationReporter(ConfigMigrationResult(migrated = true, addedDefaults = addedDefaults))
+        }
         trailsFile = YamlConfig(dataFolder, "trails.yml")
         roadsFile = YamlConfig(dataFolder, "roads.yml")
     }
