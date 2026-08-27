@@ -51,7 +51,7 @@ messages:
   roadProfilesHeader: '<prefix> <gold>Road profiles: <yellow><count><gold>.'
   roadProfileCustom: '<yellow><profile> <dark_gray>— <gray>custom: width <width>, surfaces <material-count>, forms <pattern-count>.'
   roadNoSurface: '<prefix> <red>No safe replaceable surface was found here.'
-  roadStarted: '<green>Road preview <yellow><profile><green> is enabled.<newline>Enter <yellow>/trails road commit<green> to apply the changes.'
+  roadStarted: '<green>Road preview <yellow><profile><green> is enabled.<newline>Enter <yellow>/trails build commit<green> to apply the changes.'
   roadNoSession: '<prefix> <red>No active road preview.'
   roadExpired: '<prefix> <yellow>The road preview expired without changing the world.'
   roadConflict: '<prefix> <red>The road was not committed because a block or chunk changed. Review the preview and try again.'

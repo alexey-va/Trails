@@ -85,13 +85,19 @@ class TrailsPluginIntegrationTest :
             regularRoutes shouldContain "on"
             regularRoutes shouldContain "boost"
             regularRoutes shouldNotContain "reload"
+            regularRoutes shouldNotContain "build"
             regularRoutes shouldNotContain "road"
 
             val adminRoutes = server.getCommandTabComplete(admin, "trails ")
             adminRoutes shouldContain "reload"
-            adminRoutes shouldContain "road"
-            server.getCommandTabComplete(admin, "trails road start ") shouldContain "rustic"
-            server.getCommandTabComplete(admin, "trails road list ") shouldContain "forest_walk"
+            adminRoutes shouldContain "build"
+            adminRoutes shouldNotContain "road"
+            server.getCommandTabComplete(admin, "trails build start ") shouldContain "rustic"
+            server.getCommandTabComplete(admin, "trails build list ") shouldContain "forest_walk"
+
+            server.dispatchCommand(admin, "trails road list rustic") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage())) shouldContain
+                "Invalid command arguments"
         }
 
         "road protection bypass is granted to operators but not regular builders by default" {
@@ -108,24 +114,24 @@ class TrailsPluginIntegrationTest :
             val target = server.addPlayer("OtherRoadUser")
             roadUser.addAttachment(plugin, "trails.roads.use", true)
 
-            server.getCommandTabComplete(roadUser, "trails ") shouldContain "road"
-            server.getCommandTabComplete(roadUser, "trails road status ") shouldNotContain target.name
-            server.dispatchCommand(roadUser, "trails road list footpath") shouldBe true
+            server.getCommandTabComplete(roadUser, "trails ") shouldContain "build"
+            server.getCommandTabComplete(roadUser, "trails build status ") shouldNotContain target.name
+            server.dispatchCommand(roadUser, "trails build list footpath") shouldBe true
             PlainTextComponentSerializer.plainText().serialize(checkNotNull(roadUser.nextComponentMessage())) shouldContain "footpath"
 
-            server.dispatchCommand(roadUser, "trails road status ${target.name}") shouldBe true
+            server.dispatchCommand(roadUser, "trails build status ${target.name}") shouldBe true
             PlainTextComponentSerializer.plainText().serialize(checkNotNull(roadUser.nextComponentMessage())) shouldContain
                 "permission to change another player"
 
             val manager = server.addPlayer("RoadManager").also { it.isOp = true }
-            server.getCommandTabComplete(manager, "trails road status ") shouldContain target.name
+            server.getCommandTabComplete(manager, "trails build status ") shouldContain target.name
         }
 
         "road list command renders the localized description for a selected profile" {
             val admin = server.addPlayer("RoadCatalogAdmin")
             admin.isOp = true
 
-            server.dispatchCommand(admin, "trails road list lantern_lane") shouldBe true
+            server.dispatchCommand(admin, "trails build list lantern_lane") shouldBe true
 
             val description = PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage()))
             description shouldContain "lantern_lane"
@@ -539,30 +545,30 @@ class TrailsPluginIntegrationTest :
             Files.writeString(configPath, Files.readString(configPath).replace("locale: en-US", "locale: ru-RU"))
             plugin.reloadTrails().isSuccess shouldBe true
 
-            server.dispatchCommand(admin, "trails road start rustic") shouldBe true
+            server.dispatchCommand(admin, "trails build start rustic") shouldBe true
             val startMessage = PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage()))
             startMessage shouldContain "Предпросмотр дороги rustic включён"
-            startMessage shouldContain "/trails road commit, чтобы принять изменения"
+            startMessage shouldContain "/trails build commit, чтобы принять изменения"
             admin.nextComponentMessage() shouldBe null
             plugin.captureRoadMovement(admin, Location(world, 8.5, 65.0, 0.5)) shouldBe true
             server.scheduler.performTicks(5)
             world.getBlockAt(4, 64, 0).type shouldBe Material.GRASS_BLOCK
 
-            server.dispatchCommand(admin, "trails road commit") shouldBe true
+            server.dispatchCommand(admin, "trails build commit") shouldBe true
             setOf(Material.DIRT_PATH, Material.COARSE_DIRT) shouldContain world.getBlockAt(4, 64, 0).type
             plugin.inspectTrail(world.getBlockAt(4, 64, 0))?.walks shouldBe 0
 
-            server.dispatchCommand(admin, "trails road undo") shouldBe true
+            server.dispatchCommand(admin, "trails build undo") shouldBe true
             world.getBlockAt(4, 64, 0).type shouldBe Material.GRASS_BLOCK
             plugin.inspectTrail(world.getBlockAt(4, 64, 0)) shouldBe null
 
-            server.dispatchCommand(admin, "trails road start rustic") shouldBe true
+            server.dispatchCommand(admin, "trails build start rustic") shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5)) shouldBe true
-            server.dispatchCommand(admin, "trails road commit") shouldBe true
+            server.dispatchCommand(admin, "trails build commit") shouldBe true
             val committedSideMaterial = world.getBlockAt(1, 64, 1).type
             world.getBlockAt(1, 64, 0).type = Material.STONE
 
-            server.dispatchCommand(admin, "trails road undo") shouldBe true
+            server.dispatchCommand(admin, "trails build undo") shouldBe true
 
             world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
             world.getBlockAt(1, 64, 1).type shouldBe committedSideMaterial
@@ -640,9 +646,9 @@ class TrailsPluginIntegrationTest :
             )
             plugin.reloadTrails().isSuccess shouldBe true
 
-            server.dispatchCommand(admin, "trails road start cobblestone") shouldBe true
+            server.dispatchCommand(admin, "trails build start cobblestone") shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5)) shouldBe true
-            server.dispatchCommand(admin, "trails road commit") shouldBe true
+            server.dispatchCommand(admin, "trails build commit") shouldBe true
 
             setOf(Material.STONE_BRICKS, Material.CRACKED_STONE_BRICKS) shouldContain world.getBlockAt(2, 64, 0).type
             setOf(Material.COBBLESTONE, Material.MOSSY_COBBLESTONE) shouldContain world.getBlockAt(2, 64, 1).type
@@ -1139,10 +1145,10 @@ class TrailsPluginIntegrationTest :
             )
             plugin.reloadTrails().isSuccess shouldBe true
 
-            server.dispatchCommand(admin, "trails road start footpath") shouldBe true
+            server.dispatchCommand(admin, "trails build start footpath") shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 20.5, 65.0, 0.5)) shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 21.5, 65.0, 0.5)) shouldBe true
-            server.dispatchCommand(admin, "trails road commit") shouldBe true
+            server.dispatchCommand(admin, "trails build commit") shouldBe true
 
             world.getBlockAt(10, 64, 0).type shouldBe Material.GRASS_BLOCK
             world.getBlockAt(20, 64, 0).type shouldBe Material.DIRT_PATH
@@ -1236,9 +1242,9 @@ class TrailsPluginIntegrationTest :
                 plugin,
             )
 
-            server.dispatchCommand(builder, "trails road start rustic") shouldBe true
+            server.dispatchCommand(builder, "trails build start rustic") shouldBe true
             plugin.captureRoadMovement(builder, Location(world, 1.5, 65.0, 0.5)) shouldBe true
-            server.dispatchCommand(builder, "trails road commit") shouldBe true
+            server.dispatchCommand(builder, "trails build commit") shouldBe true
 
             for (x in 0..1) {
                 for (z in -1..1) world.getBlockAt(x, 64, z).type shouldBe Material.GRASS_BLOCK

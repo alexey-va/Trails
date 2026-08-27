@@ -51,7 +51,7 @@ messages:
   roadProfilesHeader: '<prefix> <gold>道路配置：<yellow><count><gold> 个。'
   roadProfileCustom: '<yellow><profile> <dark_gray>— <gray>自定义：宽 <width>，路面 <material-count>，结构 <pattern-count>。'
   roadNoSurface: '<prefix> <red>这里没有可安全替换的地表。'
-  roadStarted: '<green>道路 <yellow><profile><green> 的预览已开启。<newline>输入 <yellow>/trails road commit<green> 以应用更改。'
+  roadStarted: '<green>道路 <yellow><profile><green> 的预览已开启。<newline>输入 <yellow>/trails build commit<green> 以应用更改。'
   roadNoSession: '<prefix> <red>没有活动的道路预览。'
   roadExpired: '<prefix> <yellow>道路预览已过期，世界未被修改。'
   roadConflict: '<prefix> <red>方块或区块发生变化，道路未提交。请检查预览后重试。'

@@ -550,7 +550,7 @@ open class TrailsPlugin : JavaPlugin() {
     ) : Command(name) {
         init {
             description = "Configure trail creation and trail speed boost."
-            usage = "/$name [on|off|boost|show|reload|status|validate|give|road]"
+            usage = "/$name [on|off|boost|show|reload|status|validate|give|build]"
         }
 
         override fun execute(

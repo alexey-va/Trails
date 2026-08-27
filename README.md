@@ -42,9 +42,9 @@ Useful operator commands:
 - `/trails status` shows schema versions, world scope, loaded definitions, and integration state.
 - `/trails give inspect [player]` gives the tagged inspection stick.
 - `/trails give advance [player]` gives the tagged trail-advance shovel.
-- `/trails road list [profile]` shows localized descriptions for all road profiles or one selected profile.
-- `/trails road start <profile> [player]` starts a client-only road preview while the player walks.
-- `/trails road commit [player]`, `cancel`, `status`, and `undo` manage the bounded road plan.
+- `/trails build list [profile]` shows localized descriptions for all road profiles or one selected profile.
+- `/trails build start <profile> [player]` starts a client-only road preview while the player walks.
+- `/trails build commit [player]`, `cancel`, `status`, and `undo` manage the bounded road plan.
 
 Giving tools requires `trails.tools.give` (operator by default). Only items issued by Trails carry the required
 persistent tag and activate the listeners, so ordinary sticks and shovels are ignored. Tagged tools can be used by
@@ -118,7 +118,7 @@ while every road block still exactly matches the committed snapshot, so it canno
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.2.3.jar`.
+The deployable JAR is written to `build/libs/Trails-2.2.4.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

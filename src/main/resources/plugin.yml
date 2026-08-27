@@ -11,7 +11,7 @@ softdepend:
 commands:
   trails:
     description: Configure trail creation and trail speed boost.
-    usage: /trails [on|off|boost|show|reload|status|validate|give|road]
+    usage: /trails [on|off|boost|show|reload|status|validate|give|build]
     aliases: [paths]
 permissions:
   trails.toggle:
