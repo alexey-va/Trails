@@ -66,12 +66,32 @@ class RoadHeightTransitionFactoryTest :
             ) shouldBe BlockFace.WEST
         }
 
-        "cardinal lane movement wins even at a turn" {
+        "row heading wins when an inside lane moves sideways at a turn" {
             RoadHeightTransitionFactory.transitionTravelFace(
                 from = RoadPoint(10, 10),
                 to = RoadPoint(11, 10),
                 headingFrom = RoadPoint(10, 10),
                 headingTo = RoadPoint(10, 20),
-            ) shouldBe BlockFace.EAST
+            ) shouldBe BlockFace.SOUTH
+        }
+
+        "every lane in a transition row shares one road heading" {
+            val laneSteps =
+                listOf(
+                    RoadPoint(9, 9) to RoadPoint(10, 9),
+                    RoadPoint(10, 9) to RoadPoint(11, 10),
+                    RoadPoint(11, 9) to RoadPoint(11, 10),
+                    RoadPoint(12, 9) to RoadPoint(11, 10),
+                    RoadPoint(13, 9) to RoadPoint(12, 9),
+                )
+
+            laneSteps.forEach { (from, to) ->
+                RoadHeightTransitionFactory.transitionTravelFace(
+                    from = from,
+                    to = to,
+                    headingFrom = RoadPoint(10, 10),
+                    headingTo = RoadPoint(10, 20),
+                ) shouldBe BlockFace.SOUTH
+            }
         }
     })

@@ -101,6 +101,7 @@ class TrailsPluginIntegrationTest :
             adminRoutes shouldNotContain "road"
             server.getCommandTabComplete(admin, "trails build start ") shouldContain "rustic"
             server.getCommandTabComplete(admin, "trails build list ") shouldContain "forest_walk"
+            server.getCommandTabComplete(admin, "trails debug ") shouldContain "stats"
 
             server.dispatchCommand(admin, "trails road list rustic") shouldBe true
             PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage())) shouldContain
@@ -238,6 +239,27 @@ class TrailsPluginIntegrationTest :
 
             block.type shouldBe Material.DIRT
             plugin.inspectTrail(block) shouldBe TrailBlockState(TrailIdentity("MeadowPath", 1), 0)
+        }
+
+        "distinct environments select desert beach snow badlands and mushroom paths" {
+            val world = server.addSimpleWorld("biome_paths")
+            val cases =
+                listOf(
+                    Triple(Material.SAND, Biome.DESERT, "DesertPath"),
+                    Triple(Material.SAND, Biome.BEACH, "BeachPath"),
+                    Triple(Material.GRASS_BLOCK, Biome.SNOWY_PLAINS, "SnowPath"),
+                    Triple(Material.RED_SAND, Biome.BADLANDS, "BadlandsPath"),
+                    Triple(Material.MYCELIUM, Biome.MUSHROOM_FIELDS, "MushroomPath"),
+                    Triple(Material.SAND, Biome.THE_VOID, "SandPath"),
+                )
+
+            cases.forEachIndexed { index, (material, biome, expected) ->
+                val block = world.getBlockAt(index, 64, 0).also {
+                    it.type = material
+                    it.biome = biome
+                }
+                plugin.debugInspect(block) shouldContain "trail=$expected"
+            }
         }
 
         "the registered movement listener adapts block changes into trail progress" {
@@ -571,6 +593,9 @@ class TrailsPluginIntegrationTest :
             server.dispatchCommand(regular, "trails debug inspect") shouldBe true
             PlainTextComponentSerializer.plainText().serialize(checkNotNull(regular.nextComponentMessage())) shouldContain
                 "permission"
+            server.dispatchCommand(regular, "trails debug stats") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(regular.nextComponentMessage())) shouldContain
+                "permission"
 
             server.dispatchCommand(admin, "trails debug inspect") shouldBe true
             val playerInspect = PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage()))
@@ -591,6 +616,15 @@ class TrailsPluginIntegrationTest :
             server.dispatchCommand(server.consoleSender, "trails debug pulse 101 DebugAdmin") shouldBe true
             PlainTextComponentSerializer.plainText().serialize(checkNotNull(server.consoleSender.nextComponentMessage())) shouldContain
                 "error=count_out_of_range"
+
+            server.dispatchCommand(server.consoleSender, "trails debug stats") shouldBe true
+            val stats = PlainTextComponentSerializer.plainText().serialize(checkNotNull(server.consoleSender.nextComponentMessage()))
+            stats shouldContain "TRAILS_DEBUG action=stats"
+            stats shouldContain "tracked=1"
+            stats shouldContain "scan_truncated=false"
+            stats shouldContain "movement_samples=5"
+            stats shouldContain "protection_vetoes=0"
+            stats shouldContain "stages=DirtPath:1:1"
         }
 
         "status and validate commands expose the active v4 configuration" {

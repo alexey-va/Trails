@@ -292,5 +292,8 @@ private class InMemoryTrailBlockStore : TrailBlockStore {
         values.remove(block)
     }
 
-    override fun trackedBlocks(chunk: Chunk): Collection<Block> = emptyList()
+    override fun trackedBlocks(
+        chunk: Chunk,
+        limit: Int,
+    ): Collection<Block> = emptyList()
 }

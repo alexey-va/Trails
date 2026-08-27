@@ -35,7 +35,10 @@ interface TrailBlockStore {
 
     fun clear(block: Block)
 
-    fun trackedBlocks(chunk: Chunk): Collection<Block>
+    fun trackedBlocks(
+        chunk: Chunk,
+        limit: Int = Int.MAX_VALUE,
+    ): Collection<Block>
 }
 
 /**
@@ -97,16 +100,22 @@ class ChunkPersistentTrailStore internal constructor(
         if (chunk.states.remove(position(block)) != null) markDirty(chunk)
     }
 
-    override fun trackedBlocks(chunk: Chunk): Collection<Block> {
+    override fun trackedBlocks(
+        chunk: Chunk,
+        limit: Int,
+    ): Collection<Block> {
         requirePrimaryThread()
+        require(limit >= 0) { "tracked block limit must not be negative" }
         val cached = cached(chunk)
-        return cached.states.keys.map { packed ->
-            chunk.getBlock(
-                TrailBlockPosition.localX(packed),
-                TrailBlockPosition.y(packed),
-                TrailBlockPosition.localZ(packed),
-            )
-        }
+        return cached.states.keys.asSequence()
+            .take(limit)
+            .map { packed ->
+                chunk.getBlock(
+                    TrailBlockPosition.localX(packed),
+                    TrailBlockPosition.y(packed),
+                    TrailBlockPosition.localZ(packed),
+                )
+            }.toList()
     }
 
     /** Flushes every dirty loaded chunk once and returns the successful count. */

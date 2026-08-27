@@ -20,6 +20,7 @@ class DecayScheduler(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) : AutoCloseable {
     private val firstObserved = mutableMapOf<DecayBlockKey, Long>()
+    private var latestStats = DecayCycleStats.enabled()
     private val task: BukkitTask =
         plugin.server.scheduler.runTaskTimer(
             plugin,
@@ -32,30 +33,61 @@ class DecayScheduler(
         task.cancel()
     }
 
+    internal fun snapshot(): DecayCycleStats = latestStats
+
     private fun runDecay() {
         val playersByWorld = plugin.server.onlinePlayers.groupBy(Player::getWorld)
         val now = currentTimeMillis()
         val activeKeys = mutableSetOf<DecayBlockKey>()
+        var loadedChunks = 0
+        var sampledChunks = 0
+        var trackedBlocks = 0
+        var idleBlocks = 0
+        var candidateBlocks = 0
+        var nearbySkipped = 0
+        var changedBlocks = 0
         plugin.server.worlds.filter { settings.worldEnabled(it.name) }.forEach { world ->
             world.loadedChunks.forEach chunkLoop@{ chunk ->
+                loadedChunks++
                 val tracked = trailService.trackedBlocks(chunk).toList()
+                trackedBlocks += tracked.size
                 tracked.mapTo(activeKeys, ::key)
                 if (random.nextDouble() > settings.chunkChance) return@chunkLoop
+                sampledChunks++
                 val idle =
                     tracked.filter { block ->
                         val blockKey = key(block)
                         val activity = trailService.lastActivityMillis(block) ?: firstObserved.getOrPut(blockKey) { now }
                         isIdle(activity, now, settings.decayMinimumIdleMinutes)
                     }
+                idleBlocks += idle.size
                 val candidates = if (settings.decayEdgeFirst) preferEdges(idle, trailService::isDecayEdge) else idle
+                candidateBlocks += candidates.size
                 val count = sampleSize(candidates.size, settings.decayFraction, random.nextDouble())
                 candidates.shuffled(random).take(count).forEach { block ->
-                    if (nearPlayer(block, playersByWorld[world].orEmpty())) return@forEach
-                    trailService.decay(block, settings.stepDecayFraction) { target -> canChange(block, target) }
+                    if (nearPlayer(block, playersByWorld[world].orEmpty())) {
+                        nearbySkipped++
+                        return@forEach
+                    }
+                    if (trailService.decay(block, settings.stepDecayFraction) { target -> canChange(block, target) }) {
+                        changedBlocks++
+                    }
                 }
             }
         }
         firstObserved.keys.retainAll(activeKeys)
+        latestStats =
+            DecayCycleStats(
+                enabled = true,
+                ranAtMillis = now,
+                loadedChunks = loadedChunks,
+                sampledChunks = sampledChunks,
+                trackedBlocks = trackedBlocks,
+                idleBlocks = idleBlocks,
+                candidateBlocks = candidateBlocks,
+                nearbySkipped = nearbySkipped,
+                changedBlocks = changedBlocks,
+            )
     }
 
     private fun nearPlayer(block: Block, players: Collection<Player>): Boolean {
@@ -94,6 +126,24 @@ class DecayScheduler(
 
         private fun key(block: Block): DecayBlockKey =
             DecayBlockKey(block.world.uid, block.x, block.y, block.z)
+    }
+}
+
+internal data class DecayCycleStats(
+    val enabled: Boolean,
+    val ranAtMillis: Long,
+    val loadedChunks: Int,
+    val sampledChunks: Int,
+    val trackedBlocks: Int,
+    val idleBlocks: Int,
+    val candidateBlocks: Int,
+    val nearbySkipped: Int,
+    val changedBlocks: Int,
+) {
+    companion object {
+        fun enabled(): DecayCycleStats = DecayCycleStats(true, 0L, 0, 0, 0, 0, 0, 0, 0)
+
+        fun disabled(): DecayCycleStats = DecayCycleStats(false, 0L, 0, 0, 0, 0, 0, 0, 0)
     }
 }
 

@@ -43,6 +43,7 @@ import ru.ruscrafting.trails.storage.TrailBlockState
 import java.nio.file.Files
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.LongAdder
 import kotlin.math.ceil
 
 open class TrailsPlugin : JavaPlugin() {
@@ -66,6 +67,9 @@ open class TrailsPlugin : JavaPlugin() {
     private var localeCommand: Command? = null
     private var pluginRuntime: PaperPluginRuntime? = null
     private val toolKindKey by lazy { NamespacedKey(this, "trail_tool_kind") }
+    private val movementSamples = LongAdder()
+    private val movementProcessingNanos = LongAdder()
+    private val protectionVetoes = LongAdder()
 
     override fun onLoad() {
         saveDefaultConfig()
@@ -198,6 +202,21 @@ open class TrailsPlugin : JavaPlugin() {
         block: Block,
         createTrail: Boolean = true,
         movementDirection: BlockFace? = null,
+    ) {
+        val startedAt = System.nanoTime()
+        try {
+            handleMovementMeasured(player, block, createTrail, movementDirection)
+        } finally {
+            movementSamples.increment()
+            movementProcessingNanos.add(System.nanoTime() - startedAt)
+        }
+    }
+
+    private fun handleMovementMeasured(
+        player: Player,
+        block: Block,
+        createTrail: Boolean,
+        movementDirection: BlockFace?,
     ) {
         if (!settings.worldEnabled(player.world.name)) {
             restoreSpeed(player)
@@ -404,6 +423,74 @@ open class TrailsPlugin : JavaPlugin() {
         return debugInspect(block).replaceFirst("action=inspect", "action=decay changed=$changed")
     }
 
+    fun debugStats(): String {
+        var loadedChunks = 0
+        var trackedBlocks = 0
+        var terminalBlocks = 0
+        var unresolvedBlocks = 0
+        var scanTruncated = false
+        val stages = sortedMapOf<String, Int>()
+        val enabledWorlds = server.worlds.filter { settings.worldEnabled(it.name) }
+        scan@ for (world in enabledWorlds) {
+            for (chunk in world.loadedChunks) {
+                loadedChunks++
+                val remaining = DEBUG_STATS_MAX_TRACKED_BLOCKS - trackedBlocks
+                val chunkBlocks = trailService.trackedBlocks(chunk, remaining + 1)
+                if (chunkBlocks.size > remaining) scanTruncated = true
+                for (block in chunkBlocks.take(remaining)) {
+                    trackedBlocks++
+                    val inspection = trailService.inspection(block)
+                    if (inspection == null) {
+                        unresolvedBlocks++
+                    } else {
+                        val key = inspection.stage.identity.serialize()
+                        stages[key] = stages.getOrDefault(key, 0) + 1
+                        if (inspection.next == null) terminalBlocks++
+                    }
+                }
+                if (scanTruncated) break@scan
+            }
+        }
+        val decay = runtimeTasks.decayStats()
+        val samples = movementSamples.sum()
+        val averageMicros = if (samples == 0L) 0L else movementProcessingNanos.sum() / samples / 1_000L
+        val visibleStages = stages.entries.take(DEBUG_STATS_MAX_STAGE_GROUPS)
+        val hiddenStageBlocks = stages.entries.drop(DEBUG_STATS_MAX_STAGE_GROUPS).sumOf { it.value }
+        val stageSummary =
+            buildList {
+                visibleStages.mapTo(this) { (stage, count) -> "${stableDebugToken(stage)}:$count" }
+                if (hiddenStageBlocks > 0) add("other:$hiddenStageBlocks")
+            }.joinToString(",").ifEmpty { "-" }
+        return listOf(
+            "TRAILS_DEBUG",
+            "action=stats",
+            "enabled_worlds=${enabledWorlds.size}",
+            "loaded_chunks=$loadedChunks",
+            "tracked=$trackedBlocks",
+            "scan_limit=$DEBUG_STATS_MAX_TRACKED_BLOCKS",
+            "scan_truncated=$scanTruncated",
+            "terminal=$terminalBlocks",
+            "unresolved=$unresolvedBlocks",
+            "decay_enabled=${decay.enabled}",
+            "decay_last_ms=${decay.ranAtMillis}",
+            "decay_sampled_chunks=${decay.sampledChunks}",
+            "decay_idle=${decay.idleBlocks}",
+            "decay_candidates=${decay.candidateBlocks}",
+            "decay_changed=${decay.changedBlocks}",
+            "decay_nearby_skipped=${decay.nearbySkipped}",
+            "protection_vetoes=${protectionVetoes.sum()}",
+            "movement_samples=$samples",
+            "movement_avg_us=$averageMicros",
+            "stages=$stageSummary",
+        ).joinToString(" ")
+    }
+
+    private fun stableDebugToken(value: String): String =
+        value.asSequence()
+            .take(DEBUG_STATS_MAX_TOKEN_CHARS)
+            .map { character -> if (character.isWhitespace()) '_' else character }
+            .joinToString("")
+
     private fun facingFromYaw(yaw: Float): BlockFace {
         val normalized = ((yaw % 360F) + 360F) % 360F
         return when {
@@ -519,7 +606,11 @@ open class TrailsPlugin : JavaPlugin() {
         runtimeTasks.reconfigure(
             settings = newSettings,
             trailService = newTrailService,
-            canDecay = { block, target -> bukkitEventProtection.canDecay(block, target) },
+            canDecay = { block, target ->
+                bukkitEventProtection.canDecay(block, target).also { allowed ->
+                    if (!allowed) protectionVetoes.increment()
+                }
+            },
         )
         settings = newSettings
         locale = newLocale
@@ -570,6 +661,7 @@ open class TrailsPlugin : JavaPlugin() {
 
     private fun checkProtectionResult(player: Player, allowed: Boolean): Boolean {
         if (allowed) return true
+        protectionVetoes.increment()
         if (settings.sendDenyMessage && denyMessageCooldown.add(player.uniqueId)) {
             message(player, "messages.cantCreateTrails")
             server.scheduler.runTaskLater(
@@ -652,5 +744,8 @@ open class TrailsPlugin : JavaPlugin() {
         const val BSTATS_PLUGIN_ID = 16930
         const val HEALTH_REPORT_TICKS = 1_200L
         const val STORAGE_FLUSH_TICKS = 20L
+        const val DEBUG_STATS_MAX_TRACKED_BLOCKS = 8_192
+        const val DEBUG_STATS_MAX_STAGE_GROUPS = 32
+        const val DEBUG_STATS_MAX_TOKEN_CHARS = 64
     }
 }

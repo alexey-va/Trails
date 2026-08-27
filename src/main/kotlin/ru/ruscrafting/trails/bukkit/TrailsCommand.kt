@@ -63,7 +63,7 @@ class TrailsCommand(
                         "show" -> listOf("30")
                         "give" -> if (sender.hasPermission("trails.tools.give")) TrailToolKind.entries.map { it.id } else emptyList()
                         "build" -> if (canUseRoads(sender)) listOf("list", "start", "commit", "cancel", "undo", "status") else emptyList()
-                        "debug" -> if (sender.hasPermission(DEBUG_PERMISSION)) listOf("inspect", "pulse", "decay") else emptyList()
+                        "debug" -> if (sender.hasPermission(DEBUG_PERMISSION)) listOf("inspect", "pulse", "decay", "stats") else emptyList()
                         else -> emptyList()
                     }
                 3 ->
@@ -298,6 +298,10 @@ class TrailsCommand(
     private fun debug(sender: CommandSender, args: List<String>) {
         if (!sender.hasPermission(DEBUG_PERMISSION)) return plugin.message(sender, "messages.noPerm")
         when (args.firstOrNull()?.lowercase()) {
+            "stats" -> {
+                if (args.size != 1) return plugin.message(sender, "messages.wrongArgs")
+                sender.sendMessage(Component.text(plugin.debugStats()))
+            }
             "inspect" -> {
                 val block = debugBlock(sender, args.drop(1)) ?: return
                 sender.sendMessage(Component.text(plugin.debugInspect(block)))

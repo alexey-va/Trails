@@ -40,6 +40,8 @@ internal class RuntimeTaskSupervisor(
 
     fun restoreSpeed(player: Player) = speedController.restore(speedTarget(player))
 
+    fun decayStats(): DecayCycleStats = tasks?.decay?.snapshot() ?: DecayCycleStats.disabled()
+
     override fun close() {
         restoreAllSpeeds()
         tasks?.close()

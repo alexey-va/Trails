@@ -27,8 +27,9 @@ chunk and should not be renamed casually.
 When a 1.9 `config.yml` is detected, Trails validates it completely, writes `config.v1.backup.yml`, generates the
 current files through temporary files, validates the generated result, and replaces `config.yml` last. Schema v2 is
 likewise migrated to the current schema with `config.v2.backup.yml`; obsolete plugin-specific adapter settings are intentionally
-dropped. For versioned current-generation configs, missing bundled keys are merged forward once without overwriting
-operator values or removing unknown keys. A failed migration leaves the old file untouched. `players.yml` is never rewritten by the config migrator.
+dropped. For versioned current-generation configs, missing bundled keys and definitions in `config.yml`, `trails.yml`,
+and `roads.yml` are merged forward once without overwriting operator values or removing unknown keys. A failed
+migration leaves the old file untouched. `players.yml` is never rewritten by the config migrator.
 Legacy per-block `trails:w` / `trails:n` data is intentionally not read or migrated; Trails 2.3 starts block progress
 in a compact checksum-protected chunk-PDC v1 store.
 
@@ -46,6 +47,7 @@ Useful operator commands:
 - `/trails debug inspect [world x y z]` prints stable trail, biome, stage, progress, and decay-edge fields.
 - `/trails debug pulse <count> [player]` applies 1–100 real movement samples through the target player's normal gates.
 - `/trails debug decay [world x y z]` exercises one protected natural-decay step.
+- `/trails debug stats` prints stable loaded-chunk, stage, decay-cycle, protection-veto, and movement-cost counters.
 - `/trails build list [profile]` shows localized descriptions for all road profiles or one selected profile.
 - `/trails build start <profile> [player]` starts a client-only road preview while the player walks.
 - `/trails build commit [player]`, `cancel`, `status`, and `undo` manage the bounded road plan.
@@ -55,9 +57,9 @@ persistent tag and activate the listeners, so ordinary sticks and shovels are ig
 players with `trails.info-tool` or `trails.trail-tool`; both are granted by default, while protection checks remain
 active for the advance tool.
 
-Natural trails can be scoped to worlds and biomes. The bundled catalog includes meadow, forest, mossy, sandy, and
-rocky variants plus a universal fallback, while a persisted trail identity always wins over later environment
-selection. Configurable 25/50/75% milestones emit a few player-only block particles, and a quiet gravel step marks a
+Natural trails can be scoped to worlds and biomes. The bundled catalog includes meadow, forest, mossy, snow, desert,
+beach, badlands, mushroom, generic sand, and rocky variants plus a universal fallback, while a persisted trail
+identity always wins over later environment selection. Configurable 25/50/75% milestones emit a few player-only block particles, and a quiet gravel step marks a
 stage transition without sending chat. The inspection tool shows a compact localized action bar; sneak while using it
 for detailed chat output. Fully worn routes can add one protected shoulder on each side after sustained terminal-stage
 traffic, but never spread beyond three blocks. Decay waits for a long inactivity window, starts conservatively after a
@@ -104,9 +106,9 @@ Each lane and height transition accepts either one material or a weighted map wh
 for example `{COBBLESTONE: 70, MOSSY_COBBLESTONE: 30}`. Surface materials are selected per road cell, while one
 transition material is selected for the complete cross-road row so contrasting stairs cannot appear as isolated
 teeth. The selection is stable for the lifetime of one preview.
-One-block height changes can use bottom slabs or direction-aware bottom stairs; stairs face along the road toward the
-higher end. Diagonal raster steps use the dominant direction of their current route segment, so isolated stair rows
-do not turn sideways, including when the route is captured while moving backwards. A height transition is emitted only when the centerline changes height and a lane follows the same step,
+One-block height changes can use bottom slabs or direction-aware bottom stairs; every stair in a cross-road transition
+row shares the road segment heading and faces toward the higher end. Lane-local movement at corners cannot rotate a
+whole row sideways, including when the route is captured while moving backwards. A height transition is emitted only when the centerline changes height and a lane follows the same step,
 which prevents isolated side slopes from producing sideways stair tangles. Periodic forms are reusable rotated
 structures with forward, lateral, and vertical offsets. Their interval, side alternation, placements, and weighted
 materials are configurable. The bundled `lantern_lane` profile places an alternating cobblestone-wall, fence, and
@@ -131,7 +133,7 @@ while every road block still exactly matches the committed snapshot, so it canno
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.3.0.jar`.
+The deployable JAR is written to `build/libs/Trails-2.3.1.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

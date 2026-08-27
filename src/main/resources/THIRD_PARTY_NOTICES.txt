@@ -1,4 +1,4 @@
-Trails 2.3.0 includes the following runtime libraries in its deployable JAR:
+Trails 2.3.1 includes the following runtime libraries in its deployable JAR:
 
 - Kotlin standard library 2.4.10 — Apache License 2.0
   Source: https://github.com/JetBrains/kotlin

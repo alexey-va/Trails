@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.3.1 — 2026-08-27
+
+### Fixed
+
+- Align every stair in a road transition row to the owning route segment, preventing complete `royal-big` rows from turning sideways at corners or during backwards capture.
+
+### Added
+
+- Add distinct snow, desert, beach, badlands, and mushroom natural-trail definitions while retaining the generic sand fallback.
+- Add console- and player-safe `/trails debug stats` output for loaded trail stages, decay activity, protection vetoes, and average movement-processing cost.
+
+### Compatibility
+
+- Merge missing bundled keys and trail/road definitions into all three modern configuration files once, preserving existing values, custom keys, and persisted trail IDs.
+
 ## 2.3.0 — 2026-08-27
 
 ### Added

@@ -47,4 +47,84 @@ class TrailsConfigurationTest :
                 folder.toFile().deleteRecursively()
             }
         }
+
+        "an existing trails catalog receives new bundled definitions without losing operator values" {
+            val folder = Files.createTempDirectory("trails-catalog-merge-")
+            val runtime = MockBukkitTestRuntime.open()
+            try {
+                copyBundled(folder, "config.yml")
+                copyBundled(folder, "roads.yml")
+                Files.writeString(
+                    folder.resolve("trails.yml"),
+                    """
+                    config-version: 1
+                    trails:
+                      DirtPath:
+                        selection-weight: 7
+                        operator-note: keep-me
+                        stages:
+                          - material: GRASS_BLOCK
+                            required-walks: 37
+                            count-chance-percent: 100
+                            speed-multiplier: 1.0
+                          - material: DIRT_PATH
+                            speed-multiplier: 1.3
+                    """.trimIndent() + "\n",
+                )
+                val reports = mutableListOf<ConfigMigrationResult>()
+
+                val first = TrailsConfiguration(folder, ensureBundledResource = {}, migrationReporter = reports::add)
+                val snapshot = first.load(reload = false)
+
+                snapshot.settings.definitions.first { it.name == "DirtPath" }.stages.first().requiredWalks shouldBe 37
+                snapshot.settings.definitions.any { it.name == "DesertPath" } shouldBe true
+                snapshot.settings.definitions.any { it.name == "MushroomPath" } shouldBe true
+                reports shouldHaveSize 1
+                val mergedOnce = Files.readString(folder.resolve("trails.yml"))
+                mergedOnce shouldContain "operator-note: keep-me"
+                mergedOnce shouldContain "selection-weight: 7"
+                mergedOnce shouldContain "DesertPath:"
+                mergedOnce shouldContain "MushroomPath:"
+
+                val secondReports = mutableListOf<ConfigMigrationResult>()
+                TrailsConfiguration(folder, ensureBundledResource = {}, migrationReporter = secondReports::add)
+                    .load(reload = false)
+                secondReports shouldHaveSize 0
+                Files.readString(folder.resolve("trails.yml")) shouldBe mergedOnce
+            } finally {
+                runtime.close()
+                folder.toFile().deleteRecursively()
+            }
+        }
+
+        "legacy roads retain v1 semantics instead of inheriting v2 profiles" {
+            val folder = Files.createTempDirectory("trails-roads-v1-merge-")
+            val runtime = MockBukkitTestRuntime.open()
+            try {
+                copyBundled(folder, "config.yml")
+                copyBundled(folder, "trails.yml")
+                val legacyRoads =
+                    """
+                    config-version: 1
+                    replaceable-materials: [DIRT]
+                    profiles:
+                      legacy:
+                        lanes: [DIRT]
+                    """.trimIndent() + "\n"
+                Files.writeString(folder.resolve("roads.yml"), legacyRoads)
+
+                val snapshot = TrailsConfiguration(folder, ensureBundledResource = {}).load(reload = false)
+
+                snapshot.roads.profiles.keys shouldBe setOf("legacy")
+                Files.readString(folder.resolve("roads.yml")) shouldBe legacyRoads
+            } finally {
+                runtime.close()
+                folder.toFile().deleteRecursively()
+            }
+        }
     })
+
+private fun copyBundled(folder: java.nio.file.Path, resource: String) {
+    val stream = checkNotNull(TrailsConfigurationTest::class.java.classLoader.getResourceAsStream(resource))
+    stream.use { Files.copy(it, folder.resolve(resource)) }
+}

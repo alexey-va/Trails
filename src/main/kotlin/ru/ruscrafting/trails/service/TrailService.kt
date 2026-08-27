@@ -153,7 +153,10 @@ class TrailService(
 
     fun canAffect(context: TrailMovementContext): Boolean = context.stage != null
 
-    fun trackedBlocks(chunk: Chunk): Collection<Block> = store.trackedBlocks(chunk)
+    fun trackedBlocks(
+        chunk: Chunk,
+        limit: Int = Int.MAX_VALUE,
+    ): Collection<Block> = store.trackedBlocks(chunk, limit)
 
     fun inspect(block: Block): TrailBlockState? = store.read(block)
 

@@ -1,6 +1,7 @@
 package ru.ruscrafting.trails
 
 import io.kotest.core.spec.style.FreeSpec
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import org.bukkit.Location
@@ -104,6 +105,37 @@ class RoadTerrainIntegrationTest :
                 val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
                 stairs.facing shouldBe BlockFace.EAST
                 setOf(Material.STONE_BRICK_STAIRS, Material.POLISHED_ANDESITE_STAIRS) shouldContain stairs.material
+            }
+        }
+
+        "royal-big keeps every stair aligned through a descending right-angle turn" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("RoyalBigCornerBuilder").also { it.isOp = true }
+            for (x in -3..5) {
+                for (z in -3..8) {
+                    world.getBlockAt(x, 64, z).type = Material.STONE
+                    if (z <= 0) world.getBlockAt(x, 65, z).type = Material.STONE
+                }
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            world.loadChunk(-1, 0)
+            world.loadChunk(-1, -1)
+            admin.teleport(Location(world, 0.5, 66.0, 0.5))
+            enableRoads(plugin)
+
+            plugin.roadStart(admin, "royal-big")
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 66.0, 0.5))
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 6.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            (-3..3).forEach { z ->
+                val data = world.getBlockAt(2, 65, z).blockData
+                withClue("transition at z=$z was ${data.asString}") {
+                    val stairs = data as Stairs
+                    stairs.facing shouldBe BlockFace.NORTH
+                    setOf(Material.STONE_BRICK_STAIRS, Material.POLISHED_ANDESITE_STAIRS) shouldContain stairs.material
+                }
             }
         }
 
