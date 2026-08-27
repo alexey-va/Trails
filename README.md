@@ -57,7 +57,8 @@ building; this probe can be disabled under `integrations.protection-events` if a
 Cancellation (or `BlockPlaceEvent.canBuild() == false`) vetoes the transition without a hard dependency. Natural
 decay uses `BlockFadeEvent`. Ordinary step-counter increments do not emit world-change events.
 
-Roads are disabled by default and require `trails.roads.manage` (operator by default). Operators also receive
+Roads are disabled by default. `trails.roads.use` grants a player access to their own road session, while
+`trails.roads.manage` remains operator-only and additionally permits targeting another player. Operators also receive
 `trails.roads.bypass-protection`, which skips only external claim-plugin probes for road commit and undo; Trails'
 block-entity, ore, liquid, unbreakable, and protected-material rules still apply. A fake-block preview is sent
 only to the builder and never changes server blocks. Its default budget is 2048 blocks for 10 minutes. Starting a
@@ -116,7 +117,7 @@ while every road block still exactly matches the committed snapshot, so it canno
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.2.0.jar`.
+The deployable JAR is written to `build/libs/Trails-2.2.1.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

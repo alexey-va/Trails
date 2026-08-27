@@ -101,6 +101,26 @@ class TrailsPluginIntegrationTest :
                 .hasPermission("trails.roads.bypass-protection") shouldBe true
         }
 
+        "road use permission exposes only the player's own session" {
+            server.pluginManager.getPermission("trails.roads.use")?.default shouldBe PermissionDefault.FALSE
+            server.pluginManager.getPermission("trails.roads.manage")?.default shouldBe PermissionDefault.OP
+            val roadUser = server.addPlayer("RoadUser")
+            val target = server.addPlayer("OtherRoadUser")
+            roadUser.addAttachment(plugin, "trails.roads.use", true)
+
+            server.getCommandTabComplete(roadUser, "trails ") shouldContain "road"
+            server.getCommandTabComplete(roadUser, "trails road status ") shouldNotContain target.name
+            server.dispatchCommand(roadUser, "trails road list footpath") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(roadUser.nextComponentMessage())) shouldContain "footpath"
+
+            server.dispatchCommand(roadUser, "trails road status ${target.name}") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(roadUser.nextComponentMessage())) shouldContain
+                "permission to change another player"
+
+            val manager = server.addPlayer("RoadManager").also { it.isOp = true }
+            server.getCommandTabComplete(manager, "trails road status ") shouldContain target.name
+        }
+
         "road list command renders the localized description for a selected profile" {
             val admin = server.addPlayer("RoadCatalogAdmin")
             admin.isOp = true

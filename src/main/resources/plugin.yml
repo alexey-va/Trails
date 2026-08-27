@@ -56,8 +56,11 @@ permissions:
   trails.info-tool:
     description: Inspect trail metadata with the configured tool.
     default: true
+  trails.roads.use:
+    description: Preview, commit, cancel, and undo the player's own Roads plans.
+    default: false
   trails.roads.manage:
-    description: Preview, commit, cancel, and undo Roads plans.
+    description: Manage Roads plans for other players as well as the sender.
     default: op
   trails.roads.bypass-protection:
     description: Commit or undo Roads plans without external protection-plugin checks.
