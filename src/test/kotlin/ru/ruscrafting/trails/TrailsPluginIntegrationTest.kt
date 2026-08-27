@@ -681,14 +681,16 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(5, 64, 0).type shouldBe Material.DIRT_PATH
         }
 
-        "height transitions place ascending and descending stairs toward the higher road end" {
+        "height transitions keep the stair back against a full road block on the higher side" {
             val world = server.addSimpleWorld("arc_qa_flat")
             val admin = server.addPlayer("StairRoadBuilder")
             admin.isOp = true
             for (z in -1..1) {
                 world.getBlockAt(0, 64, z).type = Material.STONE
-                world.getBlockAt(1, 64, z).type = Material.STONE
-                world.getBlockAt(1, 65, z).type = Material.STONE
+                for (x in 1..3) {
+                    world.getBlockAt(x, 64, z).type = Material.STONE
+                    world.getBlockAt(x, 65, z).type = Material.STONE
+                }
             }
             world.loadChunk(0, 0)
             admin.teleport(Location(world, 0.5, 65.0, 0.5))
@@ -701,24 +703,29 @@ class TrailsPluginIntegrationTest :
             )
             plugin.reloadTrails().isSuccess shouldBe true
 
-            plugin.roadStart(admin, "rustic").message shouldBe "messages.roadStarted"
-            plugin.captureRoadMovement(admin, Location(world, 1.5, 66.0, 0.5)) shouldBe true
+            plugin.roadStart(admin, "boardwalk").message shouldBe "messages.roadStarted"
+            plugin.captureRoadMovement(admin, Location(world, 3.5, 66.0, 0.5)) shouldBe true
             plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
 
             val ascending = world.getBlockAt(1, 65, 0).blockData as Stairs
             setOf(Material.OAK_STAIRS, Material.SPRUCE_STAIRS) shouldContain ascending.material
-            ascending.facing shouldBe BlockFace.EAST
+            ascending.facing shouldBe BlockFace.WEST
+            ascending.facing.oppositeFace shouldBe BlockFace.EAST
+            (world.getBlockAt(2, 65, 0).blockData is Stairs) shouldBe false
+            setOf(Material.OAK_PLANKS, Material.SPRUCE_PLANKS) shouldContain world.getBlockAt(2, 65, 0).type
 
             val wrongDirection = Material.OAK_STAIRS.createBlockData() as Stairs
             wrongDirection.facing = BlockFace.NORTH
             world.getBlockAt(1, 65, 0).blockData = wrongDirection
-            admin.teleport(Location(world, 1.5, 66.0, 0.5))
-            plugin.roadStart(admin, "rustic").message shouldBe "messages.roadStarted"
+            admin.teleport(Location(world, 3.5, 66.0, 0.5))
+            plugin.roadStart(admin, "boardwalk").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 0.5, 65.0, 0.5)) shouldBe true
             plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
 
             val descending = world.getBlockAt(1, 65, 0).blockData as Stairs
-            descending.facing shouldBe BlockFace.EAST
+            descending.facing shouldBe BlockFace.WEST
+            descending.facing.oppositeFace shouldBe BlockFace.EAST
+            setOf(Material.OAK_PLANKS, Material.SPRUCE_PLANKS) shouldContain world.getBlockAt(2, 65, 0).type
         }
 
         "height transitions support profile-specific bottom slabs" {

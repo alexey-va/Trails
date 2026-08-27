@@ -54,25 +54,31 @@ class RoadTerrainIntegrationTest :
             world.getBlockAt(1, 63, 1).type shouldBe Material.STONE
         }
 
-        "a longitudinal rise creates one complete stair row instead of an isolated stair" {
+        "a longitudinal rise creates a complete stair row backed by full road blocks" {
             val world = server.addSimpleWorld("arc_qa_flat")
             val admin = server.addPlayer("CompleteStairRoadBuilder").also { it.isOp = true }
             for (z in -1..1) {
                 world.getBlockAt(0, 64, z).type = Material.STONE
-                world.getBlockAt(1, 64, z).type = Material.STONE
+                for (x in 1..2) {
+                    world.getBlockAt(x, 64, z).type = Material.STONE
+                    world.getBlockAt(x, 65, z).type = Material.STONE
+                }
             }
-            world.getBlockAt(1, 65, 0).type = Material.STONE
             world.loadChunk(0, 0)
             world.loadChunk(0, -1)
             admin.teleport(Location(world, 0.5, 65.0, 0.5))
             enableRoads(plugin)
 
-            plugin.roadStart(admin, "rustic")
-            plugin.captureRoadMovement(admin, Location(world, 1.5, 66.0, 0.5))
+            plugin.roadStart(admin, "boardwalk")
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 66.0, 0.5))
             plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
 
             (-1..1).forEach { z ->
-                (world.getBlockAt(1, 65, z).blockData is Stairs) shouldBe true
+                val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
+                stairs.facing shouldBe BlockFace.WEST
+                stairs.facing.oppositeFace shouldBe BlockFace.EAST
+                (world.getBlockAt(2, 65, z).blockData is Stairs) shouldBe false
+                setOf(Material.OAK_PLANKS, Material.SPRUCE_PLANKS) shouldContain world.getBlockAt(2, 65, z).type
             }
         }
 
@@ -112,7 +118,7 @@ class RoadTerrainIntegrationTest :
                 val transitionMaterials =
                     (-2..2).map { z ->
                         val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
-                        stairs.facing shouldBe BlockFace.EAST
+                        stairs.facing shouldBe BlockFace.WEST
                         stairs.material
                     }.toSet()
                 transitionMaterials.size shouldBe 1

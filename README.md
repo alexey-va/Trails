@@ -117,7 +117,7 @@ while every road block still exactly matches the committed snapshot, so it canno
 ./gradlew clean check shadowJar
 ```
 
-The deployable JAR is written to `build/libs/Trails-2.2.1.jar`.
+The deployable JAR is written to `build/libs/Trails-2.2.2.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

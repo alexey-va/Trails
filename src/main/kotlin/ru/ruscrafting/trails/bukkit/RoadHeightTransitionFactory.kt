@@ -12,14 +12,15 @@ import kotlin.math.abs
 internal object RoadHeightTransitionFactory {
     fun create(
         material: Material,
-        from: RoadPoint,
-        to: RoadPoint,
-        ascending: Boolean,
+        highSide: BlockFace,
     ): BlockData {
+        require(highSide in CARDINAL_FACES) { "Road transition high side must be cardinal" }
         val data = material.createBlockData()
         when (data) {
             is Stairs -> {
-                data.facing = travelFace(from, to).let { if (ascending) it else it.oppositeFace }
+                // Bukkit's stair facing points down the steps. Keep the opposite,
+                // full-height side against the higher road block.
+                data.facing = highSide.oppositeFace
                 data.half = Bisected.Half.BOTTOM
                 data.shape = Stairs.Shape.STRAIGHT
                 data.isWaterlogged = false
@@ -32,6 +33,8 @@ internal object RoadHeightTransitionFactory {
         }
         return data
     }
+
+    private val CARDINAL_FACES = setOf(BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST)
 
     internal fun travelFace(from: RoadPoint, to: RoadPoint): BlockFace {
         val xDelta = to.x - from.x

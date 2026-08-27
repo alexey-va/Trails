@@ -8,7 +8,6 @@ import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.type.Slab
 import org.bukkit.block.data.type.Stairs
 import ru.arc.paper.testing.MockBukkitTestRuntime
-import ru.ruscrafting.trails.domain.RoadPoint
 
 class RoadHeightTransitionFactoryTest :
     FreeSpec({
@@ -17,40 +16,26 @@ class RoadHeightTransitionFactoryTest :
         beforeTest { runtime = MockBukkitTestRuntime.open() }
         afterTest { runtime.close() }
 
-        "ascending stairs face the higher end of an eastbound road" {
-            val data =
-                RoadHeightTransitionFactory.create(
-                    Material.COBBLESTONE_STAIRS,
-                    RoadPoint(0, 0),
-                    RoadPoint(1, 0),
-                    ascending = true,
-                ) as Stairs
+        "stairs keep their full-height side against the higher road block in every cardinal direction" {
+            listOf(BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST).forEach { highSide ->
+                val data =
+                    RoadHeightTransitionFactory.create(
+                        Material.COBBLESTONE_STAIRS,
+                        highSide,
+                    ) as Stairs
 
-            data.facing shouldBe BlockFace.EAST
-            data.half shouldBe Bisected.Half.BOTTOM
-            data.shape shouldBe Stairs.Shape.STRAIGHT
-            data.isWaterlogged shouldBe false
-        }
-
-        "descending stairs face back toward the higher end" {
-            val data =
-                RoadHeightTransitionFactory.create(
-                    Material.STONE_BRICK_STAIRS,
-                    RoadPoint(0, 0),
-                    RoadPoint(0, 1),
-                    ascending = false,
-                ) as Stairs
-
-            data.facing shouldBe BlockFace.NORTH
+                data.facing.oppositeFace shouldBe highSide
+                data.half shouldBe Bisected.Half.BOTTOM
+                data.shape shouldBe Stairs.Shape.STRAIGHT
+                data.isWaterlogged shouldBe false
+            }
         }
 
         "slab transitions are always dry bottom slabs" {
             val data =
                 RoadHeightTransitionFactory.create(
                     Material.OAK_SLAB,
-                    RoadPoint(0, 0),
-                    RoadPoint(-1, 0),
-                    ascending = true,
+                    BlockFace.WEST,
                 ) as Slab
 
             data.type shouldBe Slab.Type.BOTTOM

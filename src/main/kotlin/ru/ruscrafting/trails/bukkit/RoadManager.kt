@@ -530,6 +530,8 @@ class RoadManager internal constructor(
             val centerHeightDifference = toCenter.y - fromCenter.y
             if (abs(centerHeightDifference) != 1) return@forEach
             val ascending = centerHeightDifference > 0
+            val travelFace = RoadHeightTransitionFactory.travelFace(fromRow.center, toRow.center)
+            val highSide = if (ascending) travelFace else travelFace.oppositeFace
             val highCenter = if (ascending) toCenter else fromCenter
             val transitionMaterial =
                 transitionPalette.select(paletteSample(session, highCenter, 0, PlanRole.HEIGHT_TRANSITION))
@@ -541,9 +543,7 @@ class RoadManager internal constructor(
                 val transition =
                     RoadHeightTransitionFactory.create(
                         transitionMaterial,
-                        fromRow.center,
-                        toRow.center,
-                        ascending,
+                        highSide,
                     )
                 planBlock(session, draft, highBlock, lane, transition, PlanRole.HEIGHT_TRANSITION)
             }
