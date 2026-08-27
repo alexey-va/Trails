@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.6 — 2026-08-27
+
+### Fixed
+
+- Make height-transition stairs ascend toward the higher road block instead of facing downhill.
+- Cover every lane of the seven-block-wide `royal-big` profile with a direction regression test.
+
 ## 2.2.5 — 2026-08-27
 
 ### Fixed

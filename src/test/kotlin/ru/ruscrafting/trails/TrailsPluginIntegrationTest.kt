@@ -706,7 +706,7 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(5, 64, 0).type shouldBe Material.DIRT_PATH
         }
 
-        "height transitions keep the stair back against a full road block on the higher side" {
+        "height transitions ascend toward the full road block on the higher side" {
             val world = server.addSimpleWorld("arc_qa_flat")
             val admin = server.addPlayer("StairRoadBuilder")
             admin.isOp = true
@@ -734,8 +734,7 @@ class TrailsPluginIntegrationTest :
 
             val ascending = world.getBlockAt(1, 65, 0).blockData as Stairs
             setOf(Material.OAK_STAIRS, Material.SPRUCE_STAIRS) shouldContain ascending.material
-            ascending.facing shouldBe BlockFace.WEST
-            ascending.facing.oppositeFace shouldBe BlockFace.EAST
+            ascending.facing shouldBe BlockFace.EAST
             (world.getBlockAt(2, 65, 0).blockData is Stairs) shouldBe false
             setOf(Material.OAK_PLANKS, Material.SPRUCE_PLANKS) shouldContain world.getBlockAt(2, 65, 0).type
 
@@ -748,8 +747,7 @@ class TrailsPluginIntegrationTest :
             plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
 
             val descending = world.getBlockAt(1, 65, 0).blockData as Stairs
-            descending.facing shouldBe BlockFace.WEST
-            descending.facing.oppositeFace shouldBe BlockFace.EAST
+            descending.facing shouldBe BlockFace.EAST
             setOf(Material.OAK_PLANKS, Material.SPRUCE_PLANKS) shouldContain world.getBlockAt(2, 65, 0).type
         }
 

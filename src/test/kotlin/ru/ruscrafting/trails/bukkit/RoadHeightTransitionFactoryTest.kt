@@ -17,7 +17,7 @@ class RoadHeightTransitionFactoryTest :
         beforeTest { runtime = MockBukkitTestRuntime.open() }
         afterTest { runtime.close() }
 
-        "stairs keep their full-height side against the higher road block in every cardinal direction" {
+        "stairs ascend toward the higher road block in every cardinal direction" {
             listOf(BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST).forEach { highSide ->
                 val data =
                     RoadHeightTransitionFactory.create(
@@ -25,7 +25,7 @@ class RoadHeightTransitionFactoryTest :
                         highSide,
                     ) as Stairs
 
-                data.facing.oppositeFace shouldBe highSide
+                data.facing shouldBe highSide
                 data.half shouldBe Bisected.Half.BOTTOM
                 data.shape shouldBe Stairs.Shape.STRAIGHT
                 data.isWaterlogged shouldBe false

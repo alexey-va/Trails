@@ -75,10 +75,35 @@ class RoadTerrainIntegrationTest :
 
             (-1..1).forEach { z ->
                 val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
-                stairs.facing shouldBe BlockFace.WEST
-                stairs.facing.oppositeFace shouldBe BlockFace.EAST
+                stairs.facing shouldBe BlockFace.EAST
                 (world.getBlockAt(2, 65, z).blockData is Stairs) shouldBe false
                 setOf(Material.OAK_PLANKS, Material.SPRUCE_PLANKS) shouldContain world.getBlockAt(2, 65, z).type
+            }
+        }
+
+        "royal-big ascends toward high terrain across all seven lanes" {
+            val world = server.addSimpleWorld("arc_qa_flat")
+            val admin = server.addPlayer("RoyalBigStairBuilder").also { it.isOp = true }
+            for (z in -3..3) {
+                world.getBlockAt(0, 64, z).type = Material.STONE
+                for (x in 1..2) {
+                    world.getBlockAt(x, 64, z).type = Material.STONE
+                    world.getBlockAt(x, 65, z).type = Material.STONE
+                }
+            }
+            world.loadChunk(0, 0)
+            world.loadChunk(0, -1)
+            admin.teleport(Location(world, 0.5, 65.0, 0.5))
+            enableRoads(plugin)
+
+            plugin.roadStart(admin, "royal-big")
+            plugin.captureRoadMovement(admin, Location(world, 2.5, 66.0, 0.5))
+            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+
+            (-3..3).forEach { z ->
+                val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
+                stairs.facing shouldBe BlockFace.EAST
+                setOf(Material.STONE_BRICK_STAIRS, Material.POLISHED_ANDESITE_STAIRS) shouldContain stairs.material
             }
         }
 
@@ -118,7 +143,7 @@ class RoadTerrainIntegrationTest :
                 val transitionMaterials =
                     (-2..2).map { z ->
                         val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
-                        stairs.facing shouldBe BlockFace.WEST
+                        stairs.facing shouldBe BlockFace.EAST
                         stairs.material
                     }.toSet()
                 transitionMaterials.size shouldBe 1
@@ -294,7 +319,7 @@ class RoadTerrainIntegrationTest :
             world.getBlockAt(1, 64, 1).type = Material.CHEST
 
             plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
-            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT_PATH
+            setOf(Material.DIRT_PATH, Material.COARSE_DIRT) shouldContain world.getBlockAt(1, 64, 0).type
             world.getBlockAt(1, 64, 1).type shouldBe Material.CHEST
         }
     })

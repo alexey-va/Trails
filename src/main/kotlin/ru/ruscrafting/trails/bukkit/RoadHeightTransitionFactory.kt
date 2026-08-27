@@ -18,9 +18,8 @@ internal object RoadHeightTransitionFactory {
         val data = material.createBlockData()
         when (data) {
             is Stairs -> {
-                // Bukkit's stair facing points down the steps. Keep the opposite,
-                // full-height side against the higher road block.
-                data.facing = highSide.oppositeFace
+                // BlockData facing is the direction in which a bottom stair ascends.
+                data.facing = highSide
                 data.half = Bisected.Half.BOTTOM
                 data.shape = Stairs.Shape.STRAIGHT
                 data.isWaterlogged = false

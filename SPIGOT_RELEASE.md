@@ -1,4 +1,4 @@
-# Trails 2.2.5
+# Trails 2.2.6
 
 Trails naturally turns frequently walked terrain into configurable paths. The 2.2 line is a production rewrite for modern Paper/Purpur with versioned configuration, safe tagged tools, client-only road previews, crash recovery, and a large bundled road catalog.
 
@@ -14,7 +14,7 @@ Trails naturally turns frequently walked terrain into configurable paths. The 2.
 - Gradual configurable path speed boosts.
 - `/trails give inspect` and `/trails give advance` issue NBT/PDC-tagged tools; ordinary sticks and shovels do nothing.
 - `/trails build start <profile>` records a route and shows a client-only preview before commit.
-- Connected gaps, diagonal routes, backwards movement, terrain grading, correct stairs/slabs, clearance, rollback, and exact undo.
+- Connected gaps, diagonal routes, backwards movement, terrain grading, stairs that ascend toward higher terrain, slabs, clearance, rollback, and exact undo.
 - 29 bundled road profiles, including eight seven-block-wide `-big` designs with paired lanterns or beacons.
 - Generic protection-plugin compatibility through cancellable Bukkit events, without hard dependencies on niche claim plugins.
 - Russian, English, and Chinese locales.
