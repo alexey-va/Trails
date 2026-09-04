@@ -60,9 +60,9 @@ class RoadHistoryStore(
                         val before = raw["before"]?.toString() ?: return@mapNotNull null
                         val after = raw["after"]?.toString() ?: return@mapNotNull null
                         if (before.length > MAX_BLOCK_DATA_LENGTH || after.length > MAX_BLOCK_DATA_LENGTH) return@mapNotNull null
-                        val x = (raw["x"] as? Number)?.toInt() ?: return@mapNotNull null
-                        val y = (raw["y"] as? Number)?.toInt() ?: return@mapNotNull null
-                        val z = (raw["z"] as? Number)?.toInt() ?: return@mapNotNull null
+                        val x = exactInt(raw["x"]) ?: return@mapNotNull null
+                        val y = exactInt(raw["y"]) ?: return@mapNotNull null
+                        val z = exactInt(raw["z"]) ?: return@mapNotNull null
                         val previous =
                             if (raw["previous-present"] == true) {
                                 val rawIdentity = raw["previous-identity"]?.toString()
@@ -71,7 +71,7 @@ class RoadHistoryStore(
                                 if (rawIdentity != null && identity == null) return@mapNotNull null
                                 TrailBlockState(
                                     identity,
-                                    ((raw["previous-walks"] as? Number)?.toInt() ?: 0).coerceAtLeast(0),
+                                    nonNegativeInt(raw["previous-walks"]) ?: return@mapNotNull null,
                                 )
                             } else {
                                 null
@@ -85,14 +85,22 @@ class RoadHistoryStore(
                             if (afterPresent) {
                                 TrailBlockState(
                                     afterIdentity,
-                                    ((raw["after-walks"] as? Number)?.toInt() ?: 0).coerceAtLeast(0),
+                                    nonNegativeInt(raw["after-walks"]) ?: return@mapNotNull null,
                                 )
                             } else {
                                 null
                             }
                         RoadBlockRecord(x, y, z, before, after, previous, afterState)
                     }
-                if (blocks.isEmpty() || blocks.size != rawBlocks.size) null else uuid to RoadCommitRecord(world, committedAt, blocks)
+                if (
+                    blocks.isEmpty() ||
+                    blocks.size != rawBlocks.size ||
+                    blocks.map { Triple(it.x, it.y, it.z) }.toSet().size != blocks.size
+                ) {
+                    null
+                } else {
+                    uuid to RoadCommitRecord(world, committedAt, blocks)
+                }
             }.sortedBy { it.second.committedAt }.takeLast(MAX_STORED_PLAYERS)
         return linkedMapOf(*loaded.toTypedArray())
     }
@@ -114,6 +122,18 @@ class RoadHistoryStore(
             }
         }
     }
+
+    private fun exactInt(value: Any?): Int? =
+        when (value) {
+            is Byte -> value.toInt()
+            is Short -> value.toInt()
+            is Int -> value
+            is Long -> value.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt()
+            else -> null
+        }
+
+    private fun nonNegativeInt(value: Any?): Int? =
+        if (value == null) 0 else exactInt(value)?.takeIf { it >= 0 }
 
     private fun encode(history: Map<UUID, RoadCommitRecord>): String {
         val yaml = YamlConfiguration()

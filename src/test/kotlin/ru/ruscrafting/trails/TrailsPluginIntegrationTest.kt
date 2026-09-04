@@ -26,9 +26,12 @@ import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.block.BlockFadeEvent
 import org.bukkit.event.block.BlockPistonRetractEvent
 import org.bukkit.event.entity.EntityChangeBlockEvent
+import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerMoveEvent
+import org.bukkit.event.player.PlayerPortalEvent
 import org.bukkit.event.player.PlayerTeleportEvent
+import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.permissions.PermissionDefault
@@ -318,6 +321,68 @@ class TrailsPluginIntegrationTest :
 
             player.walkSpeed shouldBeExactly 0.2F
             server.scheduler.pendingTasks.none { it.owner == plugin } shouldBe true
+        }
+
+        "portal and world-change events dispatched through their own handler lists clear road sessions and speed" {
+            val world = server.addSimpleWorld("portal_world")
+            val destination = server.addSimpleWorld("portal_destination")
+            val player = server.addPlayer("PortalBuilder").also { it.isOp = true }
+            val location = Location(world, 0.5, 65.0, 0.5)
+            for (x in 0..4) world.getBlockAt(x, 64, 0).fallbackGrass()
+            world.loadChunk(0, 0)
+            player.teleport(location)
+            Files.writeString(
+                plugin.dataFolder.toPath().resolve("roads.yml"),
+                Files.readString(plugin.dataFolder.toPath().resolve("roads.yml"))
+                    .replace("enabled: false", "enabled: true")
+                    .replace("worlds: []", "worlds: [portal_world]"),
+            )
+            plugin.reloadTrails().isSuccess shouldBe true
+
+            fun startManagedState() {
+                plugin.roadStart(player, "footpath").message shouldBe "messages.roadStarted"
+                plugin.captureRoadMovement(player, Location(world, 3.5, 65.0, 0.5)) shouldBe true
+                val trailBlock = world.getBlockAt(0, 64, 0)
+                plugin.forceTrail(player, trailBlock)
+                plugin.handleMovement(player, trailBlock, createTrail = false)
+                server.scheduler.performTicks(1)
+                player.walkSpeed shouldNotBe 0.2F
+            }
+
+            player.walkSpeed = 0.2F
+            startManagedState()
+            server.pluginManager.callEvent(
+                PlayerPortalEvent(player, location, Location(destination, 0.5, 65.0, 0.5), PlayerTeleportEvent.TeleportCause.NETHER_PORTAL),
+            )
+            plugin.roadStatus(player).message shouldBe "messages.roadStatusIdle"
+            player.walkSpeed shouldBeExactly 0.2F
+
+            startManagedState()
+            server.pluginManager.callEvent(PlayerChangedWorldEvent(player, world))
+            plugin.roadStatus(player).message shouldBe "messages.roadStatusIdle"
+            player.walkSpeed shouldBeExactly 0.2F
+        }
+
+        "registered chunk unload cleanup forgets only that chunk's activity" {
+            val world = server.addSimpleWorld("activity_world")
+            val otherWorld = server.addSimpleWorld("other_activity_world")
+            val player = server.addPlayer("ActivityWalker")
+            val unloaded = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val neighbour = world.getBlockAt(16, 64, 0).fallbackGrass()
+            val otherWorldBlock = otherWorld.getBlockAt(0, 64, 0).fallbackGrass()
+
+            plugin.forceTrail(player, unloaded)
+            plugin.forceTrail(player, neighbour)
+            plugin.forceTrail(player, otherWorldBlock)
+            plugin.lastTrailActivity(unloaded) shouldNotBe null
+            plugin.lastTrailActivity(neighbour) shouldNotBe null
+            plugin.lastTrailActivity(otherWorldBlock) shouldNotBe null
+
+            runtime.callEvent(ChunkUnloadEvent(unloaded.chunk, true))
+
+            plugin.lastTrailActivity(unloaded) shouldBe null
+            plugin.lastTrailActivity(neighbour) shouldNotBe null
+            plugin.lastTrailActivity(otherWorldBlock) shouldNotBe null
         }
 
         "bukkit-event protection fires only for the material transition and respects cancellation" {

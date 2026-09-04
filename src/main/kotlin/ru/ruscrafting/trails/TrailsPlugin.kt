@@ -3,9 +3,10 @@ package ru.ruscrafting.trails
 import net.coreprotect.CoreProtect
 import net.kyori.adventure.text.Component
 import org.bstats.bukkit.Metrics
-import org.bukkit.Material
 import org.bukkit.Location
+import org.bukkit.Material
 import org.bukkit.NamespacedKey
+import org.bukkit.Chunk
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.BlockData
@@ -351,6 +352,10 @@ open class TrailsPlugin : JavaPlugin() {
             trailService.decay(block, settings.stepDecayFraction) { target -> bukkitEventProtection.canDecay(block, target) }
 
     fun clearTrailData(block: Block) = trailService.clear(block)
+
+    fun forgetTrailActivity(chunk: Chunk) = trailService.forgetActivity(chunk)
+
+    internal fun lastTrailActivity(block: Block): Long? = trailService.lastActivityMillis(block)
 
     fun moveTrailData(
         blocks: Collection<Block>,

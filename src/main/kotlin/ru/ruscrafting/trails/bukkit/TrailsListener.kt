@@ -23,9 +23,12 @@ import org.bukkit.event.block.LeavesDecayEvent
 import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.bukkit.event.entity.EntityExplodeEvent
 import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.bukkit.event.player.PlayerMoveEvent
+import org.bukkit.event.player.PlayerPortalEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerTeleportEvent
+import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.event.world.StructureGrowEvent
 import org.bukkit.inventory.EquipmentSlot
 import ru.ruscrafting.trails.TrailsPlugin
@@ -122,6 +125,11 @@ class TrailsListener(
         plugin.moveTrailData(event.blocks, event.direction.oppositeFace)
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onChunkUnload(event: ChunkUnloadEvent) {
+        plugin.forgetTrailActivity(event.chunk)
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onSpread(event: BlockSpreadEvent) {
         if (event.newState.type == Material.GRASS_BLOCK && plugin.inspectTrail(event.block) != null) {
@@ -159,8 +167,22 @@ class TrailsListener(
 
     @EventHandler(ignoreCancelled = true)
     fun onTeleport(event: PlayerTeleportEvent) {
-        plugin.discardRoadSession(event.player)
-        plugin.restoreSpeed(event.player)
+        clearTransientPlayerState(event.player)
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    fun onPortal(event: PlayerPortalEvent) {
+        clearTransientPlayerState(event.player)
+    }
+
+    @EventHandler
+    fun onWorldChanged(event: PlayerChangedWorldEvent) {
+        clearTransientPlayerState(event.player)
+    }
+
+    private fun clearTransientPlayerState(player: Player) {
+        plugin.discardRoadSession(player)
+        plugin.restoreSpeed(player)
     }
 
     private fun horizontalDirection(from: Location, to: Location): BlockFace? {

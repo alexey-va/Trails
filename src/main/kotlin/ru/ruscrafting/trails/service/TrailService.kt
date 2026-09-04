@@ -175,6 +175,14 @@ class TrailService(
 
     fun lastActivityMillis(block: Block): Long? = activity[key(block)]
 
+    /** Activity timestamps are only meaningful while the corresponding chunk remains loaded. */
+    fun forgetActivity(chunk: Chunk) {
+        val world = chunk.world.uid
+        activity.keys.removeIf { key ->
+            key.world == world && key.x shr 4 == chunk.x && key.z shr 4 == chunk.z
+        }
+    }
+
     fun isDecayEdge(block: Block): Boolean {
         val center = store.read(block) ?: return false
         val stage = catalog.resolve(block.type.name, center.identity, environmentOf(block)) ?: return false

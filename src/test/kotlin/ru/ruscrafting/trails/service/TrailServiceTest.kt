@@ -7,6 +7,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.bukkit.Chunk
 import org.bukkit.Material
+import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.block.Block
 import org.bukkit.block.BlockState
@@ -18,6 +19,7 @@ import ru.ruscrafting.trails.domain.TrailEnvironment
 import ru.ruscrafting.trails.domain.TrailStage
 import ru.ruscrafting.trails.storage.TrailBlockState
 import ru.ruscrafting.trails.storage.TrailBlockStore
+import java.util.UUID
 
 class TrailServiceTest :
     FreeSpec({
@@ -144,6 +146,32 @@ class TrailServiceTest :
             service.move(listOf(source), BlockFace.EAST)
 
             store.read(destination) shouldBe null
+        }
+
+        "forgets activity timestamps when their chunk unloads" {
+            val world = mockk<World>()
+            every { world.uid } returns UUID.randomUUID()
+            val block = mockk<Block>(relaxed = true)
+            every { block.world } returns world
+            every { block.x } returns 20
+            every { block.y } returns 64
+            every { block.z } returns -1
+            every { block.type } returns Material.GRASS_BLOCK
+            val player = mockk<Player>()
+            every { player.isSprinting } returns false
+            val store = InMemoryTrailBlockStore()
+            val service = service(store)
+            val chunk = mockk<Chunk>()
+            every { chunk.world } returns world
+            every { chunk.x } returns 1
+            every { chunk.z } returns -1
+
+            service.walk(player, block, sprintModifier = 1.0)
+            service.lastActivityMillis(block) shouldBe 1_000L
+
+            service.forgetActivity(chunk)
+
+            service.lastActivityMillis(block) shouldBe null
         }
 
         "popular terminal traffic adds exactly one symmetric pair of worn shoulders" {
