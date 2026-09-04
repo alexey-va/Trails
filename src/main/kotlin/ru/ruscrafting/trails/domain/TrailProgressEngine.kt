@@ -58,19 +58,19 @@ class TrailProgressEngine(
         val next = catalog.next(stage)
         if (next == null && (popularThreshold == null || forced)) return ProgressDecision.NoChange
         val effectiveChance = (stage.chancePercent * sprintModifier).coerceAtMost(100.0)
-        if (!forced && randomPercent > effectiveChance) return ProgressDecision.NoChange
-        val walks = currentWalks + 1
+        if (!forced && (effectiveChance == 0.0 || randomPercent > effectiveChance)) return ProgressDecision.NoChange
+        val walks = currentWalks.toLong() + 1
         if (next == null) {
             return if (walks >= popularThreshold!!) {
                 ProgressDecision.Popular(stage)
             } else {
-                ProgressDecision.TerminalCounted(stage, walks)
+                ProgressDecision.TerminalCounted(stage, walks.toInt())
             }
         }
         return if (forced || walks >= stage.requiredWalks) {
             ProgressDecision.Advanced(stage, next)
         } else {
-            ProgressDecision.Counted(stage, walks)
+            ProgressDecision.Counted(stage, walks.toInt())
         }
     }
 

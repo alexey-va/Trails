@@ -26,6 +26,17 @@ class TrailProgressEngineTest :
             engine.walk(grass, 0, 100.0, 3.0) shouldBe ProgressDecision.Counted(grass, 1)
         }
 
+        "zero chance never counts even when the random roll is zero" {
+            engine.walk(grass, 0, 0.0, 0.0) shouldBe ProgressDecision.NoChange
+            engine.walk(grass.copy(chancePercent = 0.0), 0, 0.0, 1.0) shouldBe ProgressDecision.NoChange
+        }
+
+        "maximum persisted counters advance without overflowing" {
+            engine.walk(grass, Int.MAX_VALUE, 0.0, 1.0) shouldBe ProgressDecision.Advanced(grass, dirt)
+            engine.walk(path, Int.MAX_VALUE, 0.0, 1.0, popularThreshold = Int.MAX_VALUE) shouldBe
+                ProgressDecision.Popular(path)
+        }
+
         "manual advance transitions immediately" {
             engine.walk(grass, 0, 100.0, 0.0, forced = true) shouldBe ProgressDecision.Advanced(grass, dirt)
         }
