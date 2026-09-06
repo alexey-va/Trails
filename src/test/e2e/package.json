@@ -1,0 +1,8 @@
+{
+  "name": "trails-e2e",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@drownek/plugwright": "2.0.4"
+  }
+}

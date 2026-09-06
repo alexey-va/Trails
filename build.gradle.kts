@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.shadow)
     jacoco
+    id("io.github.drownek.plugwright") version "2.0.4"
 }
 
 group = "ru.ruscrafting"
@@ -225,4 +226,20 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
 
 tasks.check {
     dependsOn(tasks.jacocoTestCoverageVerification, verifyPluginArtifact)
+}
+
+// E2E runs separately from check: a disposable real Paper server and Mineflayer clients.
+plugwright {
+    minecraftVersion.set("1.21.11")
+    runDir.set(layout.buildDirectory.dir("plugwright"))
+    testsDir.set(layout.projectDirectory.dir("src/test/e2e"))
+    downloadNode.set(true)
+    nodeVersion.set("22.14.0")
+    acceptEula.set(true)
+    jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
+    writeFiles {
+        file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
+        file("plugins/Trails/roads.yml", projectDir.resolve("src/main/resources/roads.yml").readText()
+            .replaceFirst("enabled: false", "enabled: true"))
+    }
 }

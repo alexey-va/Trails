@@ -127,6 +127,29 @@ dropped at the builder and owner-locked. A compensated commit is deliberately no
 duplication. Other last commits for up to 10 builders are stored atomically in `road-history.yml`; undo succeeds only
 while every road block still exactly matches the committed snapshot, so it cannot overwrite later edits.
 
+## End-to-end tests on Paper
+
+```bash
+./gradlew plugwrightTest
+```
+
+The separate E2E suite uses [Plugwright 2.0.4](https://github.com/Drownek/plugwright)
+with Paper 1.21.11 and real Mineflayer clients. It verifies walking-induced trail wear,
+`/trails off` and `/trails on`, and a two-player Roads preview → commit → undo journey.
+The Roads check compares both clients and queries the authoritative server block during
+preview. Existing Kotest/MockBukkit tests remain part of `check`.
+
+Use Java 25 and leave localhost port 25565 available. Gradle downloads checksum-verified
+Node.js 22.14.0 and installs the npm dependencies recorded in `src/test/e2e/package-lock.json`.
+The configured task accepts the Minecraft EULA for the disposable test server. It binds
+only to 127.0.0.1 and stores its world, logs, and plugin data in `build/plugwright/`.
+Each run clears the test data while retaining server download caches. Roads is enabled
+only in the staged test configuration; packaged gameplay defaults are unchanged.
+
+GitHub Actions runs this suite in the separate `e2e` job on Ubuntu with Java 25.
+The `trails-paper-e2e` artifact retains the test console output and Paper logs for seven days,
+including failed runs. To run one scenario locally, use `-PtestNames="road preview"`.
+
 ## Build
 
 ```bash
