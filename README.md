@@ -143,7 +143,8 @@ Released `arc-core` runtime and test artifacts are resolved anonymously from the
 repository. Trails shades and relocates `arc-core-paper` for lifecycle, task ownership, and bounded runtime-health
 diagnostics; tests use `arc-core-paper-testing` to own MockBukkit's process-global lifecycle consistently. Production
 persistence remains in Trails' narrow adapters. Trail block state is decoded once per loaded chunk, served from an
-in-memory index, and flushed in a round-robin batch of at most eight dirty chunks per tick. Chunk encoding is reused
+in-memory index, and flushed in round-robin batches of at most eight dirty chunks. The periodic task runs each tick;
+world-save events may also advance one batch, and unload queues its own chunk. Chunk encoding is reused
 until another mutation. A dedicated single I/O worker commits atomic recovery snapshots and acknowledges persisted
 records; world-save, chunk-load, and chunk-unload handlers never wait for filesystem I/O. Per-chunk writes coalesce
 without discarding changes to other chunks. PDC advances only after the corresponding journal commit completes.
