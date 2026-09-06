@@ -221,7 +221,13 @@ class TrailsPluginIntegrationTest :
                 PersistentDataType.BYTE_ARRAY,
             ) shouldBe false
 
-            server.scheduler.performTicks(20)
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+            while (!block.chunk.persistentDataContainer.has(
+                    NamespacedKey(plugin, "block_states_v1"), PersistentDataType.BYTE_ARRAY,
+                ) && System.nanoTime() < deadline) {
+                server.scheduler.performOneTick()
+                Thread.sleep(5)
+            }
 
             block.chunk.persistentDataContainer.has(
                 NamespacedKey(plugin, "block_states_v1"),

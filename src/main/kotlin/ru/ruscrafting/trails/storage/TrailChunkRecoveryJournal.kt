@@ -53,7 +53,7 @@ internal class TrailChunkRecoveryJournal(root: Path) {
             decode = TrailChunkSnapshotCodec::decode,
             validate = TrailChunkSnapshotCodec::validate,
         )
-    private val records = linkedMapOf<ChunkId, TrailChunkSnapshot>()
+    private val records = java.util.concurrent.ConcurrentHashMap<ChunkId, TrailChunkSnapshot>()
 
     init {
         journal.loadAll().forEach { record ->

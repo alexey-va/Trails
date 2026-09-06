@@ -748,7 +748,7 @@ open class TrailsPlugin : JavaPlugin() {
     private companion object {
         const val BSTATS_PLUGIN_ID = 16930
         const val HEALTH_REPORT_TICKS = 1_200L
-        const val STORAGE_FLUSH_TICKS = 20L
+        const val STORAGE_FLUSH_TICKS = 1L
         const val DEBUG_STATS_MAX_TRACKED_BLOCKS = 8_192
         const val DEBUG_STATS_MAX_STAGE_GROUPS = 32
         const val DEBUG_STATS_MAX_TOKEN_CHARS = 64
