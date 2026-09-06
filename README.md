@@ -143,9 +143,15 @@ Released `arc-core` runtime and test artifacts are resolved anonymously from the
 repository. Trails shades and relocates `arc-core-paper` for lifecycle, task ownership, and bounded runtime-health
 diagnostics; tests use `arc-core-paper-testing` to own MockBukkit's process-global lifecycle consistently. Production
 persistence remains in Trails' narrow adapters. Trail block state is decoded once per loaded chunk, served from an
-in-memory index, and coalesced into one bounded binary chunk payload every second, on chunk unload, world save, or
-plugin shutdown. Every changed chunk receives an atomic write-ahead recovery snapshot before its PDC is mutated; the
-snapshot remains until a later chunk load proves Paper persisted the same state.
+in-memory index, and flushed in a round-robin batch of at most eight dirty chunks per tick. Chunk encoding is reused
+until another mutation. A dedicated single I/O worker commits atomic recovery snapshots and acknowledges persisted
+records; world-save, chunk-load, and chunk-unload handlers never wait for filesystem I/O. Per-chunk writes coalesce
+without discarding changes to other chunks. PDC advances only after the corresponding journal commit completes.
+If a chunk unloads first, its latest immutable snapshot stays in the queue and overlays older disk data on reload.
+As with ordinary asynchronous saves, an abrupt process or host loss can lose updates that have not reached the journal;
+completed journal records survive until a later chunk load proves Paper persisted the same state. Shutdown drains writes
+for up to ten seconds, with a bounded executor termination wait, and reports persistence failures. Failed commits and
+acknowledgements remain queued for retry and appear in storage health.
 
 ## Architecture
 
