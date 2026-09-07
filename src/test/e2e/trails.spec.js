@@ -54,19 +54,36 @@ async function walkLaps(player, signal) {
   }
 }
 
-async function timedWalkToX(player, x, signal) {
-  const startedAt = performance.now();
-  await walkToX(player, x, signal);
-  return performance.now() - startedAt;
-}
-
-async function timedRoundTrips(player, startX, endX, count, signal) {
-  let elapsed = 0;
-  for (let trip = 0; trip < count; trip++) {
-    elapsed += await timedWalkToX(player, endX, signal);
-    elapsed += await timedWalkToX(player, startX, signal);
-  }
-  return elapsed;
+async function observeWalkingSpeed(player, predicate, action, signal) {
+  const client = player.bot._client;
+  return new Promise((resolve, reject) => {
+    let timeout;
+    const cleanup = () => {
+      client.removeListener('abilities', onAbilities);
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new Error('aborted'));
+    };
+    const onAbilities = (packet) => {
+      if (typeof packet.walkingSpeed === 'number' && predicate(packet.walkingSpeed)) {
+        cleanup();
+        resolve(packet.walkingSpeed);
+      }
+    };
+    client.on('abilities', onAbilities);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Paper did not send the expected native walking-speed packet'));
+    }, 10000);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve().then(action).catch((error) => {
+      cleanup();
+      reject(error);
+    });
+  });
 }
 
 test('walking wears grass into a trail on real Paper', async ({ player, server, signal }) => {
@@ -89,21 +106,13 @@ test('trails off prevents wear; trails on restores it', async ({ player, server,
 
 test('native trail speed boost applies on a worn block and restores after leaving it', async ({ player, server, signal }) => {
   await prepare(server, player, 24, signal);
-  player.chat('/trails off');
-  await expect(player).toHaveReceivedMessage('Your trails are now disabled');
-  const baseline = await timedRoundTrips(player, 0.5, 2.5, 4, signal);
-
-  player.chat('/trails on');
-  await expect(player).toHaveReceivedMessage('Your trails are now enabled');
-  await timedRoundTrips(player, 0.5, 2.5, 4, signal);
+  await walkLaps(player, signal);
   await hasBlock(player, 1, 24, 'dirt', signal);
   await player.teleport(0.5, 65, 24.5);
-  const boosted = await timedRoundTrips(player, 0.5, 2.5, 4, signal);
-  assert.ok(boosted < baseline * 0.98, `Trail walk speed did not increase: baseline ${baseline.toFixed(1)}ms, boosted ${boosted.toFixed(1)}ms`);
-
-  await walkToX(player, 3.5, signal);
-  const restored = await timedRoundTrips(player, 3.5, 5.5, 4, signal);
-  assert.ok(restored > boosted * 1.02, `Trail walk speed did not restore after leaving it: boosted ${boosted.toFixed(1)}ms, grass ${restored.toFixed(1)}ms`);
+  const boosted = await observeWalkingSpeed(player, (speed) => speed > 0.1001, () => walkToX(player, 1.7, signal), signal);
+  assert.ok(boosted > 0.1, `Expected native trail speed above 0.1, got ${boosted}`);
+  const restored = await observeWalkingSpeed(player, (speed) => speed <= 0.10001, () => walkToX(player, 3.5, signal), signal);
+  assert.ok(Math.abs(restored - 0.1) <= 0.00001, `Expected native speed to restore to 0.1, got ${restored}`);
 });
 
 test('native idle decay regresses a worn trail after the fixture idle window', async ({ player, server, signal }) => {
