@@ -27,10 +27,14 @@ Kotlin/Paper rewrite of the owner-maintained Trails plugin.
   geometry/history/commit/undo, weighted palettes, periodic forms, compensation, commands, localization parity,
   reload, lifecycle cleanup, and artifact identity.
 
-## Build
+## Development build
 
 ```bash
-./gradlew clean check shadowJar
+./gradlew shadowJar
 ```
 
-The build is standalone and must not require private repositories or credentials.
+Run a focused unit test with `./gradlew test --tests '<fully-qualified-test-pattern>' shadowJar`
+when the change needs it. Full artifact, coverage, and verification checks are
+opt-in with `./gradlew clean check shadowJar`; the separate Paper E2E lane is
+`./gradlew plugwrightTest`. The build is standalone and must not require private
+repositories or credentials.
