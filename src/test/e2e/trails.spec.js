@@ -58,6 +58,13 @@ async function observeWalkingSpeed(player, predicate, action, signal) {
   const client = player.bot._client;
   return new Promise((resolve, reject) => {
     let timeout;
+    let observedSpeed;
+    let actionCompleted = false;
+    const finish = () => {
+      if (observedSpeed === undefined || !actionCompleted) return;
+      cleanup();
+      resolve(observedSpeed);
+    };
     const cleanup = () => {
       client.removeListener('abilities', onAbilities);
       clearTimeout(timeout);
@@ -69,8 +76,8 @@ async function observeWalkingSpeed(player, predicate, action, signal) {
     };
     const onAbilities = (packet) => {
       if (typeof packet.walkingSpeed === 'number' && predicate(packet.walkingSpeed)) {
-        cleanup();
-        resolve(packet.walkingSpeed);
+        observedSpeed = packet.walkingSpeed;
+        finish();
       }
     };
     client.on('abilities', onAbilities);
@@ -79,7 +86,10 @@ async function observeWalkingSpeed(player, predicate, action, signal) {
       reject(new Error('Paper did not send the expected native walking-speed packet'));
     }, 10000);
     signal?.addEventListener('abort', onAbort, { once: true });
-    Promise.resolve().then(action).catch((error) => {
+    Promise.resolve().then(action).then(() => {
+      actionCompleted = true;
+      finish();
+    }).catch((error) => {
       cleanup();
       reject(error);
     });
