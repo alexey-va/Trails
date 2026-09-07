@@ -556,7 +556,11 @@ open class TrailsPlugin : JavaPlugin() {
 
     fun boostEnabled(uuid: UUID): Boolean = preferences.get(uuid).boostEnabled(settings.boostEnabledByDefault)
 
-    fun setTrailsEnabled(uuid: UUID, enabled: Boolean) = preferences.setEnabled(uuid, enabled)
+    fun setTrailsEnabled(uuid: UUID, enabled: Boolean) {
+        val previouslyEnabled = trailsEnabled(uuid)
+        preferences.setEnabled(uuid, enabled)
+        if (enabled && !previouslyEnabled) ru.ruscrafting.trails.integration.ArcProductTelemetry.enabled(uuid)
+    }
 
     fun setBoostEnabled(uuid: UUID, enabled: Boolean) = preferences.setBoost(uuid, enabled)
 
