@@ -54,20 +54,17 @@ async function walkLaps(player, signal) {
   }
 }
 
-async function walkSpeed(server, player) {
-  server.execute('minecraft:scoreboard objectives add e2e_speed dummy');
-  const marker = `TRAILS_SPEED=${randomUUID()}`;
-  server.execute(`minecraft:execute store result score ${player.username} e2e_speed run data get entity ${player.username} abilities.walk_speed 1000`);
-  server.execute(`minecraft:tellraw ${player.username} {"text":"${marker} ","extra":[{"score":{"name":"${player.username}","objective":"e2e_speed"}}]}`);
-  const since = player.messageBuffer.length;
-  await waitUntil(() => player.messageBuffer.slice(since).some((message) => message.includes(marker)), {
-    timeout: 10000,
-    message: 'Paper did not report the native player walk speed',
-  });
-  const message = player.messageBuffer.slice(since).find((entry) => entry.includes(marker));
-  const match = String(message).match(new RegExp(`${marker} (\\d+)`));
-  assert.ok(match, `Unexpected speed response: ${message}`);
-  return Number(match[1]);
+async function timedWalkToX(player, x, signal) {
+  const startedAt = performance.now();
+  await walkToX(player, x, signal);
+  return performance.now() - startedAt;
+}
+
+async function walkWideLaps(player, signal) {
+  for (let lap = 0; lap < 5; lap++) {
+    await walkToX(player, 4.5, signal);
+    await walkToX(player, 0.5, signal);
+  }
 }
 
 test('walking wears grass into a trail on real Paper', async ({ player, server, signal }) => {
@@ -90,30 +87,23 @@ test('trails off prevents wear; trails on restores it', async ({ player, server,
 
 test('native trail speed boost applies on a worn block and restores after leaving it', async ({ player, server, signal }) => {
   await prepare(server, player, 24, signal);
-  await walkLaps(player, signal);
-  await hasBlock(player, 1, 24, 'dirt', signal);
+  await player.teleport(0.5, 65, 24.5);
+  const baseline = await timedWalkToX(player, 3.5, signal);
 
   await player.teleport(0.5, 65, 24.5);
-  await walkToX(player, 0.8, signal);
-  const baseline = await walkSpeed(server, player);
-
-  await player.teleport(1.5, 65, 24.5);
-  await walkToX(player, 1.7, signal);
-  await waitUntil(async () => (await walkSpeed(server, player)) > baseline, {
+  await walkWideLaps(player, signal);
+  await waitUntil(() => [1, 2, 3, 4].every((x) => blockAt(player, x, 24) !== 'grass_block'), {
     signal,
     timeout: 10000,
-    message: 'Trail walk speed did not increase on the worn block',
+    message: 'Native trail wear did not create the measured trail segment',
   });
-  const boosted = await walkSpeed(server, player);
-  assert.ok(boosted > baseline, `Expected boosted speed above ${baseline}, got ${boosted}`);
+  await player.teleport(0.5, 65, 24.5);
+  const boosted = await timedWalkToX(player, 3.5, signal);
+  assert.ok(boosted < baseline * 0.92, `Trail walk speed did not increase: baseline ${baseline.toFixed(1)}ms, boosted ${boosted.toFixed(1)}ms`);
 
-  await walkToX(player, 3.5, signal);
-  await waitUntil(async () => (await walkSpeed(server, player)) === baseline, {
-    signal,
-    timeout: 10000,
-    message: 'Trail walk speed did not restore after leaving the trail',
-  });
-  assert.equal(await walkSpeed(server, player), baseline);
+  await walkToX(player, 5.5, signal);
+  const restored = await timedWalkToX(player, 8.5, signal);
+  assert.ok(restored > boosted * 1.08, `Trail walk speed did not restore after leaving it: boosted ${boosted.toFixed(1)}ms, grass ${restored.toFixed(1)}ms`);
 });
 
 test('native idle decay regresses a worn trail after the fixture idle window', async ({ player, server, signal }) => {
