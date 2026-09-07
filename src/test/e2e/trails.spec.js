@@ -60,11 +60,13 @@ async function timedWalkToX(player, x, signal) {
   return performance.now() - startedAt;
 }
 
-async function walkWideLaps(player, signal) {
-  for (let lap = 0; lap < 5; lap++) {
-    await walkToX(player, 4.5, signal);
-    await walkToX(player, 0.5, signal);
+async function timedRoundTrips(player, startX, endX, count, signal) {
+  let elapsed = 0;
+  for (let trip = 0; trip < count; trip++) {
+    elapsed += await timedWalkToX(player, endX, signal);
+    elapsed += await timedWalkToX(player, startX, signal);
   }
+  return elapsed;
 }
 
 test('walking wears grass into a trail on real Paper', async ({ player, server, signal }) => {
@@ -87,22 +89,20 @@ test('trails off prevents wear; trails on restores it', async ({ player, server,
 
 test('native trail speed boost applies on a worn block and restores after leaving it', async ({ player, server, signal }) => {
   await prepare(server, player, 24, signal);
-  await player.teleport(0.5, 65, 24.5);
-  const baseline = await timedWalkToX(player, 3.5, signal);
+  player.chat('/trails off');
+  await expect(player).toHaveReceivedMessage('Your trails are now disabled');
+  const baseline = await timedRoundTrips(player, 0.5, 2.5, 4, signal);
 
+  player.chat('/trails on');
+  await expect(player).toHaveReceivedMessage('Your trails are now enabled');
+  await timedRoundTrips(player, 0.5, 2.5, 4, signal);
+  await hasBlock(player, 1, 24, 'dirt', signal);
   await player.teleport(0.5, 65, 24.5);
-  await walkWideLaps(player, signal);
-  await waitUntil(() => [1, 2, 3, 4].every((x) => blockAt(player, x, 24) !== 'grass_block'), {
-    signal,
-    timeout: 10000,
-    message: 'Native trail wear did not create the measured trail segment',
-  });
-  await player.teleport(0.5, 65, 24.5);
-  const boosted = await timedWalkToX(player, 3.5, signal);
+  const boosted = await timedRoundTrips(player, 0.5, 2.5, 4, signal);
   assert.ok(boosted < baseline * 0.92, `Trail walk speed did not increase: baseline ${baseline.toFixed(1)}ms, boosted ${boosted.toFixed(1)}ms`);
 
-  await walkToX(player, 5.5, signal);
-  const restored = await timedWalkToX(player, 8.5, signal);
+  await walkToX(player, 3.5, signal);
+  const restored = await timedRoundTrips(player, 3.5, 5.5, 4, signal);
   assert.ok(restored > boosted * 1.08, `Trail walk speed did not restore after leaving it: boosted ${boosted.toFixed(1)}ms, grass ${restored.toFixed(1)}ms`);
 });
 
