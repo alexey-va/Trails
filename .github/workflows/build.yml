@@ -7,12 +7,6 @@ on:
   pull_request:
     paths-ignore: ['**/*.md', 'docs/**', '.agents/**', '.codex/**', 'src/test/e2e/**']
   workflow_dispatch:
-    inputs:
-      heavy_tests:
-        description: Run real-Paper E2E jobs
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
@@ -38,7 +32,6 @@ jobs:
       - run: ./gradlew --no-daemon --build-cache test shadowJar verifyPluginArtifact
 
   e2e:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.heavy_tests }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
