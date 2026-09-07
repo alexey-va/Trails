@@ -246,6 +246,7 @@ plugwright {
     jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
     writeFiles {
         file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
+        file("plugins/Trails/config.yml", projectDir.resolve("src/test/e2e/fixtures/config.yml"))
         file("plugins/Trails/roads.yml", projectDir.resolve("src/main/resources/roads.yml").readText()
             .replaceFirst("enabled: false", "enabled: true"))
     }

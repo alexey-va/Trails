@@ -1,0 +1,11 @@
+config-version: 4
+
+speed-boost:
+  remove-immediately-off-trail: true
+
+decay:
+  interval-ticks: 20
+  chunk-selection-chance-percent: 100
+  blocks-per-chunk-percent: 100
+  step-counter-reduction-percent: 100
+  minimum-idle-minutes: 1
