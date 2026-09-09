@@ -188,5 +188,6 @@ ru.ruscrafting.arc:arc-core-logging:2.0.2=compileClasspath,testCompileClasspath
 ru.ruscrafting.arc:arc-core-metrics:2.0.2=compileClasspath,testCompileClasspath
 ru.ruscrafting.arc:arc-core-paper-testing:2.0.2=testCompileClasspath,testRuntimeClasspath
 ru.ruscrafting.arc:arc-core-paper:2.0.2=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
+ru.ruscrafting.arc:arc-core-paper-api:2.7.6=compileClasspath,testCompileClasspath,testRuntimeClasspath
 ru.ruscrafting.arc:arc-core:2.0.2=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 empty=annotationProcessor,implementationDependenciesMetadata,kotlinCompilerPluginClasspath,kotlinNativeCompilerPluginClasspath,kotlinScriptDefExtensions,shadow,testAnnotationProcessor,testImplementationDependenciesMetadata,testKotlinScriptDefExtensions

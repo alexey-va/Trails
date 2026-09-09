@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.2"
+version = "2.3.3"
 
 repositories {
     mavenCentral()
@@ -39,6 +39,7 @@ repositories {
 
 dependencies {
     compileOnly(libs.paper.api)
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
 
     implementation(libs.bstats.bukkit)
     implementation(libs.arc.core.paper) {
@@ -55,6 +56,7 @@ dependencies {
     testImplementation(libs.kotest.assertions.core)
     testImplementation(libs.mockk)
     testImplementation(libs.arc.core.paper.testing)
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     testImplementation(libs.placeholder.api)
     testRuntimeOnly(libs.coreprotect)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -116,7 +118,9 @@ tasks.shadowJar {
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
     relocate("org.bstats", "ru.ruscrafting.trails.lib.bstats")
-    relocate("ru.arc", "ru.ruscrafting.trails.lib.arc")
+    relocate("ru.arc", "ru.ruscrafting.trails.lib.arc") {
+        exclude("ru.arc.paper.api.**")
+    }
     mergeServiceFiles()
 }
 
@@ -194,13 +198,13 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         }
         val descriptor = zipTree(jar).matching { include("plugin.yml") }.singleFile.readText()
         check("main: ru.ruscrafting.trails.TrailsPlugin" in descriptor)
-        check("version: \"2.3.2\"" in descriptor)
+        check("version: \"${project.version}\"" in descriptor)
         check("- ARC" in descriptor) { "Optional ARC telemetry requires dependency classloader visibility" }
         val telemetryBytecode = zipTree(jar).matching {
             include("ru/ruscrafting/trails/integration/ArcProductTelemetry.class")
         }.singleFile.readBytes().toString(Charsets.ISO_8859_1)
-        check("ru.ruscrafting.trails.lib.arc.metrics.ExternalProductTelemetryBridge" !in telemetryBytecode) {
-            "Shadow rewrote the external ARC telemetry API into a nonexistent bundled class"
+        check("ru/arc/paper/api/ArcTelemetryProvider" in telemetryBytecode) {
+            "Shadow relocated the shared ARC telemetry contract"
         }
         val notices = zipTree(jar).matching { include("THIRD_PARTY_NOTICES.txt") }.singleFile.readText()
         listOf("Kotlin standard library 2.4.10", "JetBrains Java annotations 13.0", "arc-core and arc-core-paper 2.0.2", "bStats base and Bukkit 3.2.1")
