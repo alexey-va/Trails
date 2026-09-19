@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.4"
+version = "2.3.5"
 
 repositories {
     mavenCentral()
@@ -201,7 +201,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
         check("version: \"${project.version}\"" in descriptor)
         check("- ARC" in descriptor) { "Optional ARC telemetry requires dependency classloader visibility" }
         val telemetryBytecode = zipTree(jar).matching {
-            include("ru/ruscrafting/trails/integration/ArcProductTelemetry.class")
+            include("ru/ruscrafting/trails/integration/ArcProductTelemetry\$AvailableArcTelemetry.class")
         }.singleFile.readBytes().toString(Charsets.ISO_8859_1)
         check("ru/arc/paper/api/ArcTelemetryProvider" in telemetryBytecode) {
             "Shadow relocated the shared ARC telemetry contract"

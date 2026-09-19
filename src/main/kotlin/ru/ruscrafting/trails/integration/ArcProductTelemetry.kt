@@ -6,9 +6,15 @@ import java.util.UUID
 
 /** Reports an actual off-to-on preference change; no per-movement telemetry. */
 internal object ArcProductTelemetry {
-    private val telemetry by lazy { Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java) }
-
     fun enabled(playerId: UUID) {
-        runCatching { telemetry?.recordEvent(playerId, "trails", "trail_enabled", UUID.randomUUID().toString()) }
+        if (!Bukkit.getPluginManager().isPluginEnabled("ARC")) return
+        runCatching { AvailableArcTelemetry.enabled(playerId) }
+    }
+
+    private object AvailableArcTelemetry {
+        fun enabled(playerId: UUID) {
+            Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java)
+                ?.recordEvent(playerId, "trails", "trail_enabled", UUID.randomUUID().toString())
+        }
     }
 }

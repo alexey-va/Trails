@@ -159,7 +159,7 @@ including failed runs. To run one scenario locally, use `-PtestNames="road previ
 For a focused change, run the relevant unit test explicitly, for example
 `./gradlew test --tests '*TrailsConfigurationTest' shadowJar`. Full coverage and artifact
 verification are opt-in with `./gradlew clean check shadowJar`; the deployable
-JAR is written to `build/libs/Trails-2.3.4.jar`.
+JAR is written to `build/libs/Trails-2.3.5.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven
