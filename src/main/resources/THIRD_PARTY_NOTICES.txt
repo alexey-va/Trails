@@ -6,7 +6,7 @@ Trails 2.3.5 includes the following runtime libraries in its deployable JAR:
 - JetBrains Java annotations 13.0 — Apache License 2.0
   Source: https://github.com/JetBrains/java-annotations
   License text: META-INF/licenses/Apache-2.0.txt
-- arc-core and arc-core-paper 2.7.11 — Apache License 2.0
+- arc-core and arc-core-paper 2.7.13 — Apache License 2.0
   Source: https://github.com/alexey-va/arc-core
   License text: META-INF/licenses/Apache-2.0.txt
 - bStats base and Bukkit 3.2.1 — MIT License
