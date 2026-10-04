@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.3.5 — 2026-10-05
+
+This Spigot release includes the changes made in 2.3.2–2.3.5.
+
+### Performance
+
+- Move recovery-journal commit and acknowledgement I/O to a dedicated worker so world-save, chunk-load, and chunk-unload handlers do not wait for filesystem writes or fsync.
+- Coalesce repeated writes per chunk while preserving independent chunk updates and the latest pending snapshot across unload/reload.
+- Reuse encoded state until the chunk changes and advance the periodic round-robin flush queue in batches of at most eight dirty chunks per invocation. World-save events can advance another batch; unloading queues its chunk separately.
+
+### Fixed
+
+- Keep failed journal operations queued for retry and prevent stale acknowledgements from removing newer snapshots.
+- Fix zero-chance trail progression and walk-counter overflow.
+- Clean transient trail state and reject corrupt road history.
+- Keep Trails usable without the optional ARC telemetry API.
+
+### Compatibility
+
+- Update the bundled shared runtime and aligned test modules to arc-core 2.7.17.
+- Keep Paper/Purpur 1.21.11 and Java 25 requirements, existing configuration values, and persisted modern trail identities.
+- As with asynchronous saves, abrupt process or host loss can lose updates that have not reached their first durable journal commit; completed journal records retain crash recovery.
+
 ## 2.3.1 — 2026-08-27
 
 ### Fixed

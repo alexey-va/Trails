@@ -1,6 +1,25 @@
-# Trails 2.3.1
+# Trails 2.3.5
 
-Trails naturally turns frequently walked terrain into configurable paths. Version 2.3.1 fixes wide-road stair alignment, adds five visually distinct biome trail families, and gives operators a compact live statistics command.
+Trails naturally turns frequently walked terrain into configurable paths. Version 2.3.5 reduces server-thread storage work, keeps Trails standalone when optional ARC telemetry is unavailable, and includes the biome trails and road fixes added since the previous Spigot release.
+
+## Update notes
+
+### Performance
+
+- Recovery-journal commits and acknowledgements run on a dedicated I/O worker instead of the server tick thread, removing filesystem writes and fsync waits from world-save, chunk-load, and chunk-unload handlers.
+- Trail state is decoded once per loaded chunk and served from an in-memory index. Repeated writes to the same chunk coalesce, and encoded state is reused until that chunk changes.
+- The periodic flush task processes up to eight dirty chunks per invocation in round-robin order. World-save events can advance another batch; unloading queues that chunk separately.
+- Failed writes remain queued for retry, and pending snapshots overlay older disk state when a chunk reloads. As with asynchronous saves, abrupt process or host loss can lose updates that have not reached their first durable journal commit.
+
+### Also included since 2.2.5
+
+- Biome-specific natural trails, subtle progress effects, a localized inspector progress bar, protected worn shoulders, and edge-first idle decay.
+- Correct stair alignment across wide-road transition rows, including corners and backwards route capture.
+- `/trails debug stats` for loaded trail stages, decay activity, protection vetoes, and average movement-processing cost.
+- Fixes for zero-chance progression, walk-counter overflow, transient state cleanup, and corrupt road history.
+- Optional ARC telemetry remains optional: Trails works without ARC or its API. The bundled shared runtime is updated to arc-core 2.7.17.
+
+Replace the old JAR with `Trails-2.3.5.jar` and restart the server. Keep your existing configuration; missing bundled keys and definitions merge forward without replacing your values. Requirements remain Paper/Purpur 1.21.11 and Java 25.
 
 ## Requirements
 
