@@ -17,7 +17,7 @@ Trails naturally turns frequently walked terrain into configurable paths. Versio
 - Correct stair alignment across wide-road transition rows, including corners and backwards route capture.
 - `/trails debug stats` for loaded trail stages, decay activity, protection vetoes, and average movement-processing cost.
 - Fixes for zero-chance progression, walk-counter overflow, transient state cleanup, and corrupt road history.
-- Optional ARC telemetry remains optional: Trails works without ARC or its API. The bundled shared runtime is updated to arc-core 2.7.17.
+- Optional ARC telemetry remains optional: Trails works without ARC or its API. The bundled shared runtime is updated to arc-core 2.7.18.
 
 Replace the old JAR with `Trails-2.3.5.jar` and restart the server. Keep your existing configuration; missing bundled keys and definitions merge forward without replacing your values. Requirements remain Paper/Purpur 1.21.11 and Java 25.
 
