@@ -114,6 +114,7 @@ tasks.jacocoTestCoverageVerification {
 tasks.shadowJar {
     archiveClassifier.set("")
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    exclude("net/kyori/adventure/**")
     exclude("ru/arc/paper/api/**")
     exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
     filesMatching("META-INF/LICENSE-arc-core.txt") {
