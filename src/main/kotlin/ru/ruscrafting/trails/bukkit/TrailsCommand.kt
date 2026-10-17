@@ -45,8 +45,8 @@ class TrailsCommand(
             when (args.size) {
                 1 ->
                     buildList {
-                        if (sender.hasPermission("trails.toggle")) addAll(listOf("on", "off"))
-                        if (sender.hasPermission("trails.toggle-boost")) add("boost")
+                        if (sender.hasPermission("trails.toggle") || sender.hasPermission("trails.other")) addAll(listOf("on", "off"))
+                        if (sender.hasPermission("trails.toggle-boost") || sender.hasPermission("trails.toggle-boost.other")) add("boost")
                         if (sender.hasPermission("trails.show")) add("show")
                         if (sender.hasPermission("trails.reload")) add("reload")
                         if (sender.hasPermission("trails.status")) add("status")
@@ -59,8 +59,11 @@ class TrailsCommand(
                 2 ->
                     when (args[0].lowercase()) {
                         "on", "off" -> if (sender.hasPermission("trails.other")) otherPlayers(sender) else emptyList()
-                        "boost" -> listOf("on", "off") + if (sender.hasPermission("trails.toggle-boost.other")) otherPlayers(sender) else emptyList()
-                        "show" -> listOf("30")
+                        "boost" -> buildList {
+                            if (sender.hasPermission("trails.toggle-boost") || sender.hasPermission("trails.toggle-boost.other")) addAll(listOf("on", "off"))
+                            if (sender.hasPermission("trails.toggle-boost.other")) addAll(otherPlayers(sender))
+                        }
+                        "show" -> if (sender is Player && sender.hasPermission("trails.show")) listOf("30") else emptyList()
                         "give" -> if (sender.hasPermission("trails.tools.give")) TrailToolKind.entries.map { it.id } else emptyList()
                         "build" -> if (canUseRoads(sender)) listOf("list", "start", "commit", "cancel", "undo", "status") else emptyList()
                         "debug" -> if (sender.hasPermission(DEBUG_PERMISSION)) listOf("inspect", "pulse", "decay", "stats") else emptyList()
@@ -68,12 +71,15 @@ class TrailsCommand(
                     }
                 3 ->
                     when {
-                        args[0].equals("boost", true) && sender.hasPermission("trails.toggle-boost.other") -> otherPlayers(sender)
-                        args[0].equals("give", true) && sender.hasPermission("trails.tools.give") -> plugin.server.onlinePlayers.map(Player::getName)
+                        args[0].equals("boost", true) && args[1].lowercase() in setOf("on", "off") &&
+                            sender.hasPermission("trails.toggle-boost.other") -> otherPlayers(sender)
+                        args[0].equals("give", true) && TrailToolKind.fromId(args[1].lowercase()) != null &&
+                            sender.hasPermission("trails.tools.give") -> plugin.server.onlinePlayers.map(Player::getName)
                         args[0].equals("build", true) &&
                             canUseRoads(sender) &&
                             (args[1].equals("start", true) || args[1].equals("list", true)) -> plugin.roadProfiles().toList()
-                        args[0].equals("build", true) && sender.hasPermission(ROADS_MANAGE_PERMISSION) ->
+                        args[0].equals("build", true) && args[1].lowercase() in setOf("commit", "cancel", "undo", "status") &&
+                            sender.hasPermission(ROADS_MANAGE_PERMISSION) ->
                             plugin.server.onlinePlayers.map(Player::getName)
                         args[0].equals("debug", true) &&
                             sender.hasPermission(DEBUG_PERMISSION) &&
@@ -88,10 +94,11 @@ class TrailsCommand(
                     when {
                         args[0].equals("build", true) &&
                             args[1].equals("start", true) &&
+                            args[2] in plugin.roadProfiles() &&
                             sender.hasPermission(ROADS_MANAGE_PERMISSION) -> plugin.server.onlinePlayers.map(Player::getName)
                         args[0].equals("debug", true) &&
                             sender.hasPermission(DEBUG_PERMISSION) &&
-                            args[1].equals("pulse", true) ->
+                            args[1].equals("pulse", true) && args[2].toIntOrNull()?.let { it in 1..100 } == true ->
                             plugin.server.onlinePlayers.map(Player::getName)
                         else -> emptyList()
                     }
