@@ -129,7 +129,8 @@ test('native idle decay regresses a worn trail after the fixture idle window', a
   await prepare(server, player, 32, signal);
   await walkLaps(player, signal);
   await hasBlock(player, 1, 32, 'dirt', signal);
-  await player.teleport(20.5, 65, 32.5);
+  // Stay on the prepared floor, beyond the five-block decay exclusion radius.
+  await player.teleport(10.5, 65, 32.5);
   await waitUntil(() => blockAt(player, 1, 32) === 'grass_block', {
     signal,
     timeout: 90000,

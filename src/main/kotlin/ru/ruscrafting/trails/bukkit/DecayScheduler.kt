@@ -100,6 +100,8 @@ class DecayScheduler(
                 when {
                     cycle.chunks.hasNext() -> {
                         val next = cycle.chunks.next()
+                        // The loaded-chunk inventory may be older than this cursor step.
+                        if (!isLoaded(next)) return@submit false
                         cycle.loadedChunks++
                         cycle.chunk = next
                         cycle.afterPosition = null
@@ -120,7 +122,7 @@ class DecayScheduler(
                     else -> return@submit true
                 }
                 false
-            } else if (!chunk.world.isChunkLoaded(chunk.x, chunk.z)) {
+            } else if (!isLoaded(chunk)) {
                 cycle.chunk = null
                 false
             } else {
@@ -152,10 +154,22 @@ class DecayScheduler(
             }
         }.thenCompose {
             val preparation = waiting
-            if (preparation == null) CompletableFuture.completedFuture(batch) else preparation.thenCompose {
-                nativeWork.call({ !closed }) { captureChunk(cycle) }.thenCompose { it }
+            if (preparation == null) CompletableFuture.completedFuture(batch) else preparation.handle { _, failure -> failure }.thenCompose { failure ->
+                nativeWork.call({ !closed }) {
+                    val chunk = cycle.chunk
+                    // Unloading an optional decay chunk invalidates its preparation normally;
+                    // it must not abandon every later chunk in this world inventory.
+                    if (chunk == null || !isLoaded(chunk)) cycle.chunk = null
+                    else if (failure != null) throw failure
+                    captureChunk(cycle)
+                }.thenCompose { it }
             }
         }
+    }
+
+    private fun isLoaded(chunk: Chunk): Boolean {
+        val world = chunk.world
+        return plugin.server.getWorld(world.uid) === world && world.isChunkLoaded(chunk.x, chunk.z)
     }
 
     private fun finishCycle(cycle: Cycle): CompletableFuture<Unit> {

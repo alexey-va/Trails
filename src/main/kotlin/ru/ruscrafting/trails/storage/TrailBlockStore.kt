@@ -511,7 +511,7 @@ class ChunkPersistentTrailStore internal constructor(
             prepareEntry(entry).whenComplete { _, error ->
                 if (error != null) {
                     entry.ready.completeExceptionally(error)
-                    if (!closed.get()) {
+                    if (!closed.get() && entry.valid) {
                         failedFlushes += id
                         plugin.logger.severe("Could not prepare trail chunk $id: $error")
                     }

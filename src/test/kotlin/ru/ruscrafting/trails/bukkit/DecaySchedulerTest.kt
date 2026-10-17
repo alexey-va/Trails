@@ -40,6 +40,76 @@ class DecaySchedulerTest :
             DecayScheduler.preferEdges(listOf("a", "b")) { it == "b" } shouldBe listOf("b")
         }
 
+
+        listOf(true, false).forEach { unload ->
+            (if (unload) "an unloaded cold chunk does not abandon later loaded decay chunks"
+             else "a preparation failure in a still-loaded decay chunk remains exceptional") {
+                MockBukkitTestRuntime.open().use { paper ->
+                    val plugin = paper.createSimplePlugin("TrailDecayUnload")
+                    val world = paper.addSimpleWorld("decay")
+                    world.loadChunk(0, 0)
+                    world.loadChunk(1, 0)
+                    val (cold, later) = world.loadedChunks.take(2)
+                    val block = world.getBlockAt(later.x * 16, 64, later.z * 16).also { it.type = Material.DIRT_PATH }
+                    val settings = mockk<TrailsSettings>()
+                    every { settings.decayTimer } returns 10_000L
+                    every { settings.worldEnabled(any()) } returns true
+                    every { settings.chunkChance } returns 1.0
+                    every { settings.decayEdgeFirst } returns false
+                    every { settings.decayFraction } returns 1.0
+                    every { settings.decayMinimumIdleMinutes } returns 1L
+                    every { settings.decayDistance } returns 0.0
+                    every { settings.stepDecayFraction } returns 1.0
+                    val prepared = CompletableFuture<Unit>()
+                    val failure = IllegalStateException("delayed preparation failure")
+                    val service = mockk<TrailService>()
+                    var preparations = 0
+                    var changed = 0
+                    every { service.isChunkReady(any()) } answers { firstArg<org.bukkit.Chunk>() !== cold }
+                    every { service.prepareChunk(any()) } answers { preparations++; prepared }
+                    every { service.nextTrackedBlock(any(), any()) } answers {
+                        if (firstArg<org.bukkit.Chunk>() === later && secondArg<Int?>() == null) 0 to block else null
+                    }
+                    every { service.lastActivityMillis(any()) } returns 0L
+                    every { service.decay(any(), any(), any()) } answers { changed++; true }
+                    val scheduler = TestTaskScheduler()
+                    val scope = LifecycleTaskScope(scheduler)
+                    val native = BudgetedTaskQueue(scope, maximumSteps = 7, nanoTime = { 0L })
+                    val storage = BoundedAsyncExecutor("decay-unload-test")
+                    val decay = DecayScheduler(plugin, settings, service, native, storage,
+                        random = Random(7), currentTimeMillis = { 60_000L })
+                    try {
+                        val cycle = decay.runCycle()
+                        repeat(100) { if (preparations == 0) scheduler.tick() }
+                        preparations shouldBe 1
+                        cycle.isDone shouldBe false
+                        if (unload) world.unloadChunk(cold.x, cold.z) shouldBe true
+                        prepared.completeExceptionally(failure)
+                        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8)
+                        while (!cycle.isDone && System.nanoTime() < deadline) {
+                            scheduler.tick()
+                            Thread.sleep(1)
+                        }
+                        cycle.isDone shouldBe true
+                        cycle.isCompletedExceptionally shouldBe !unload
+                        if (unload) {
+                            cycle.join()
+                            changed shouldBe 1
+                            decay.snapshot().changedBlocks shouldBe 1
+                        } else {
+                            val cause = cycle.handle { _, error -> error }.join()
+                            generateSequence(cause) { it.cause }.last() shouldBe failure
+                            changed shouldBe 0
+                        }
+                    } finally {
+                        prepared.complete(Unit)
+                        decay.close(); native.close(); scope.close()
+                        storage.closeAsync().get(5, TimeUnit.SECONDS)
+                    }
+                }
+            }
+        }
+
         "a cold 300-block cycle waits outside the shared queue and captures or mutates at most seven blocks per tick" {
             MockBukkitTestRuntime.open().use { paper ->
                 val plugin = paper.createSimplePlugin("TrailDecayBudget")
