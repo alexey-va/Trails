@@ -47,14 +47,14 @@ jobs:
       - name: Download immutable native cleanup provider
         run: |
           mkdir -p build/e2e-runtime
-          curl --fail --location --retry 3 --output build/e2e-runtime/ArcCore-0.1.12.jar https://repo.rus-crafting.ru/grocermc/ru/ruscrafting/ArcCore/0.1.12/ArcCore-0.1.12.jar
-          echo '93158072f30ad3d7d5201acdf9036324841c4455844b4f1b650cfea0d8540502  build/e2e-runtime/ArcCore-0.1.12.jar' | sha256sum --check --strict
+          curl --fail --location --retry 3 --output build/e2e-runtime/ArcCore-0.1.13.jar https://repo.rus-crafting.ru/grocermc/ru/ruscrafting/ArcCore/0.1.13/ArcCore-0.1.13.jar
+          echo '952cca75616a433f7ee02ea0a0d078b4b88291dafd62e7acb415be3952dbef10  build/e2e-runtime/ArcCore-0.1.13.jar' | sha256sum --check --strict
       - name: Test Trails on real Paper
         shell: bash
         run: |
           set -o pipefail
           mkdir -p build
-          ./gradlew --no-daemon plugwrightTest -Pe2eArcCoreJar=build/e2e-runtime/ArcCore-0.1.12.jar 2>&1 | tee build/plugwright-e2e.log
+          ./gradlew --no-daemon plugwrightTest -Pe2eArcCoreJar=build/e2e-runtime/ArcCore-0.1.13.jar 2>&1 | tee build/plugwright-e2e.log
           git diff --exit-code -- src/test/e2e/package-lock.json
       - name: Upload E2E results and Paper logs
         if: always()

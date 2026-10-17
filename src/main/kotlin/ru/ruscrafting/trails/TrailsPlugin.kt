@@ -77,18 +77,16 @@ open class TrailsPlugin : JavaPlugin() {
     private lateinit var commandHandler: TrailsCommand
     private var localeCommand: Command? = null
     private var pluginRuntime: PaperPluginRuntime? = null
-    private class StorageGeneration(val worker: BoundedAsyncExecutor) {
-        val resources = ConcurrentLinkedDeque<AutoCloseable>()
-        val drain = CompletableFuture<Unit>()
-        var nativeWork: BudgetedTaskQueue? = null
-        var chunkDrain: CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
-        var roadDrain: CompletableFuture<Void> = CompletableFuture.completedFuture(null)
-        var nativeCleanup: ArcNativeCleanupService? = null
-        var reload: CompletableFuture<Result<Unit>>? = null
-        val movements = java.util.concurrent.ConcurrentHashMap<UUID, CompletableFuture<Unit>>()
-        val movementVersions = java.util.concurrent.ConcurrentHashMap<UUID, Long>()
-        val movementSequence = java.util.concurrent.atomic.AtomicLong()
-    }
+    private lateinit var storage: BoundedAsyncExecutor
+    private val storageResources = ConcurrentLinkedDeque<AutoCloseable>()
+    private var nativeQueue: BudgetedTaskQueue? = null
+    private var cleanupService: ArcNativeCleanupService? = null
+    private var nativeCleanupTail = CompletableFuture.completedFuture<Void>(null)
+    private var shutdownFailure: Throwable? = null
+    private var reloadInFlight: CompletableFuture<Result<Unit>>? = null
+    private val movements = java.util.concurrent.ConcurrentHashMap<UUID, CompletableFuture<Unit>>()
+    private val movementVersions = java.util.concurrent.ConcurrentHashMap<UUID, Long>()
+    private val movementSequence = java.util.concurrent.atomic.AtomicLong()
     private class Prepared(
         val configuration: TrailsConfiguration,
         val loaded: ru.ruscrafting.trails.config.TrailsConfigurationSnapshot,
@@ -97,20 +95,19 @@ open class TrailsPlugin : JavaPlugin() {
         val history: LinkedHashMap<UUID, RoadCommitRecord>,
         val recoveryJournal: TrailChunkRecoveryJournal,
     )
-    private var generation: StorageGeneration? = null
-    private var predecessor = CompletableFuture.completedFuture(Unit)
     private var ready = false
     internal fun isReady(): Boolean = ready
-    internal fun drained(): CompletableFuture<Unit> = (generation?.drain ?: predecessor).copy()
+    internal fun drained(): CompletableFuture<Unit> = shutdownFailure?.let { CompletableFuture.failedFuture(it) }
+        ?: nativeCleanupTail.thenApply<Unit> { }
     internal fun tasks() = requireNotNull(pluginRuntime) { "Trails is closed" }.tasks
-    internal fun nativeWork() = requireNotNull(generation?.nativeWork) { "Trails native work is closed" }
-    internal fun nativeCleanup() = requireNotNull(generation?.nativeCleanup) { "ArcCore native cleanup service is unavailable" }
+    internal fun nativeWork() = requireNotNull(nativeQueue) { "Trails native work is closed" }
+    internal fun nativeCleanup() = requireNotNull(cleanupService) { "ArcCore native cleanup service is unavailable" }
     private val toolKindKey by lazy { NamespacedKey(this, "trail_tool_kind") }
     private val movementSamples = LongAdder()
     private val movementProcessingNanos = LongAdder()
     private val protectionVetoes = LongAdder()
 
-    private fun prepare(owner: StorageGeneration): Prepared {
+    private fun prepare(): Prepared {
         saveDefaultConfig()
         val configuration =
             TrailsConfiguration(
@@ -128,7 +125,7 @@ open class TrailsPlugin : JavaPlugin() {
         val loaded = configuration.load(reload = false)
         val preferences = PlayerPreferencesStore(dataFolder.toPath()) { error ->
             logger.severe("Could not save players.yml asynchronously: ${error.message}")
-        }.also(owner.resources::add)
+        }.also(storageResources::add)
         val historyStore = RoadHistoryStore(dataFolder.toPath())
         val history = runCatching(historyStore::load).getOrElse { error ->
             logger.warning("Could not load road-history.yml; undo history starts empty: ${error.message}")
@@ -138,53 +135,47 @@ open class TrailsPlugin : JavaPlugin() {
     }
 
     override fun onEnable() {
+        if (!nativeCleanupTail.isDone || nativeCleanupTail.isCompletedExceptionally) {
+            logger.severe("Previous Trails native cleanup is still pending or failed")
+            server.pluginManager.disablePlugin(this)
+            return
+        }
         val lifecycle = PaperPluginRuntime(this, "trails", BukkitTaskScheduler(this)).also {
             pluginRuntime = it
             it.start("version" to pluginMeta.version)
         }
-        predecessor.whenCompleteSync(lifecycle.tasks) { _, failure ->
-            if (pluginRuntime !== lifecycle) return@whenCompleteSync
-            if (failure != null) failStartup(lifecycle, failure) else beginGeneration(lifecycle)
-        }
-    }
-
-    private fun beginGeneration(lifecycle: PaperPluginRuntime) {
         try {
-            val owner = StorageGeneration(BoundedAsyncExecutor("Trails-storage"))
-            generation = owner
-            owner.nativeWork = BudgetedTaskQueue(lifecycle.tasks)
-            owner.worker.submit { prepare(owner) }.whenCompleteSync(lifecycle.tasks) { prepared, failure ->
-                if (generation !== owner || pluginRuntime !== lifecycle) return@whenCompleteSync
-                if (failure != null || prepared == null) failStartup(lifecycle, failure ?: IllegalStateException("Missing Trails configuration"))
-                else finishEnable(lifecycle, owner, prepared)
+            shutdownFailure = null
+            cleanupService = requireNotNull(server.servicesManager.load(ArcNativeCleanupService::class.java)) {
+                "ArcCore native cleanup service is unavailable"
             }
+            storage = BoundedAsyncExecutor("Trails-storage")
+            nativeQueue = BudgetedTaskQueue(lifecycle.tasks)
+            finishEnable(lifecycle, storage.submit { prepare() }.get())
         } catch (failure: Throwable) { failStartup(lifecycle, failure) }
     }
 
-    private fun finishEnable(lifecycle: PaperPluginRuntime, owner: StorageGeneration, prepared: Prepared) {
+    private fun finishEnable(lifecycle: PaperPluginRuntime, prepared: Prepared) {
         try {
-            owner.nativeCleanup = requireNotNull(server.servicesManager.load(ArcNativeCleanupService::class.java)) {
-                "ArcCore native cleanup service is unavailable"
-            }
             configuration = prepared.configuration
             preferences = prepared.preferences
-            runtimeTasks = lifecycle.own(RuntimeTaskSupervisor(this, preferences, requireNotNull(owner.nativeWork), owner.worker))
-            blockStore = ChunkPersistentTrailStore(this, requireNotNull(owner.nativeWork), prepared.recoveryJournal,
+            runtimeTasks = lifecycle.own(RuntimeTaskSupervisor(this, preferences, nativeWork(), storage))
+            blockStore = ChunkPersistentTrailStore(this, nativeWork(), prepared.recoveryJournal,
                 onForeignClear = { world, chunk, position -> trailService.forgetActivity(world, chunk, position) })
             val activeStore = blockStore
-            lifecycle.own(AutoCloseable { owner.chunkDrain = activeStore.closeAsync() })
+            lifecycle.own(activeStore)
             server.pluginManager.registerEvents(blockStore, this)
             lifecycle.tasks.runTimer(STORAGE_FLUSH_TICKS, STORAGE_FLUSH_TICKS) { blockStore.flushDirty() }
             val loaded = prepared.loaded
             applyRuntime(loaded.settings, loaded.locale)
-            trailVisibility = TrailVisibilityController(server, requireNotNull(owner.nativeWork),
+            trailVisibility = TrailVisibilityController(server, nativeWork(),
                 { chunk, after -> trailService.nextTrackedBlock(chunk, after) }, activeStore::prepare)
             val activeVisibility = trailVisibility
             lifecycle.own(activeVisibility)
             roadSettings = loaded.roads
             roadManager = RoadManager(this, loaded.roads, historyStore = prepared.historyStore, initialHistory = prepared.history)
             val activeRoadManager = roadManager
-            lifecycle.own(AutoCloseable { owner.roadDrain = activeRoadManager.closeAsync() })
+            lifecycle.own(AutoCloseable { activeRoadManager.close() })
             lifecycle.tasks.runTimer(5L, 5L, roadManager::tick)
             runCatching { Metrics(this, BSTATS_PLUGIN_ID) }
                 .onFailure { logger.warning("bStats could not initialize and will be skipped: ${it.message}") }
@@ -231,57 +222,58 @@ open class TrailsPlugin : JavaPlugin() {
 
     override fun onDisable() {
         ready = false
-        val owner = generation
-        generation = null
-        if (owner != null) predecessor = owner.drain
-        val lifecycle = pluginRuntime
+        val lifecycle = pluginRuntime ?: return
         pluginRuntime = null
-        var nativeFailure: Throwable? = null
+        val queue = nativeQueue.also { nativeQueue = null }
+        val store = if (::blockStore.isInitialized) blockStore else null
+        val roads = if (::roadManager.isInitialized) roadManager else null
+        var failure: Throwable? = null
         fun attempt(close: () -> Unit) {
-            try { close() } catch (failure: Throwable) {
-                if (nativeFailure == null) nativeFailure = failure else nativeFailure.addSuppressed(failure)
+            try { close() } catch (error: Throwable) {
+                if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
             }
         }
-        attempt { owner?.nativeWork?.close() }
-        attempt { lifecycle?.close() }
-        if (owner != null) closeStorage(owner, nativeFailure)
+        attempt { queue?.close() }
+        attempt { lifecycle.close() }
+        if (roads != null) nativeCleanupTail = runCatching { roads.closeAsync() }
+            .getOrElse { CompletableFuture.failedFuture(it) }
+        val chunks = runCatching { store?.closeAsync() ?: CompletableFuture.completedFuture(Unit) }
+            .getOrElse { CompletableFuture.failedFuture(it) }
+        // Chunk/prefs futures are IO-only after cancellation; road cleanup needs future Main ticks.
+        attempt {
+            if (::storage.isInitialized) storage.closeAsync {
+                var terminalFailure: Throwable? = null
+                fun closeResource(close: () -> Unit) {
+                    try { close() } catch (error: Throwable) {
+                        if (terminalFailure == null) terminalFailure = error else if (terminalFailure !== error) terminalFailure.addSuppressed(error)
+                    }
+                }
+                closeResource { chunks.join() }
+                while (true) {
+                    val resource = storageResources.pollLast() ?: break
+                    closeResource { if (resource is PlayerPreferencesStore) resource.closeAsync().join() else resource.close() }
+                }
+                terminalFailure?.let { throw it }
+            }.join()
+        }
+        shutdownFailure = failure
+        failure?.let { logger.severe("Could not close Trails storage: ${it.javaClass.simpleName}: ${it.message}") }
+        cleanupService = null
+        reloadInFlight = null
+        movements.clear()
+        movementVersions.clear()
         placeholderExpansion = null
         localeCommand = null
     }
 
-    private fun closeStorage(owner: StorageGeneration, nativeFailure: Throwable?) {
-        owner.worker.closeAsync {
-            var failure = nativeFailure
-            try { owner.chunkDrain.join() } catch (error: Throwable) {
-                if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
-            }
-            try { owner.roadDrain.join() } catch (error: Throwable) {
-                if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
-            }
-            while (true) {
-                val resource = owner.resources.pollLast() ?: break
-                try {
-                    if (resource is PlayerPreferencesStore) resource.closeAsync().join() else resource.close()
-                } catch (error: Throwable) {
-                    if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
-                }
-            }
-            failure?.let { throw it }
-        }.whenComplete { _, failure ->
-            if (failure == null) owner.drain.complete(Unit) else {
-                owner.drain.completeExceptionally(failure)
-                logger.severe("Could not close Trails storage: ${failure.javaClass.simpleName}: ${failure.message}")
-            }
-        }
-    }
-
     fun reloadTrails(): CompletableFuture<Result<Unit>> {
-        val owner = generation ?: return CompletableFuture.completedFuture(Result.failure(IllegalStateException("Trails is closed")))
-        owner.reload?.takeUnless { it.isDone }?.let { return it.copy() }
+        val lifecycle = pluginRuntime ?: return CompletableFuture.completedFuture(Result.failure(IllegalStateException("Trails is closed")))
+        reloadInFlight?.takeUnless { it.isDone }?.let { return it.copy() }
         val activeConfiguration = configuration
         val activeRoadManager = roadManager
-        val attempt = owner.worker.submit { activeConfiguration.load(reload = true) }.thenCompose { loaded ->
-            requireNotNull(owner.nativeWork).call({ generation === owner && ready }) {
+        val queue = nativeWork()
+        val attempt = storage.submit { activeConfiguration.load(reload = true) }.thenCompose { loaded ->
+            queue.call({ pluginRuntime === lifecycle && ready }) {
                 applyRuntime(loaded.settings, loaded.locale)
                 roadSettings = loaded.roads
                 activeRoadManager.reconfigure(loaded.roads)
@@ -293,14 +285,14 @@ open class TrailsPlugin : JavaPlugin() {
                 logger.severe("Trails reload rejected; previous runtime remains active: ${it.exceptionOrNull()?.message}")
             }
         }
-        owner.reload = attempt
+        reloadInFlight = attempt
         return attempt.copy()
     }
 
     fun validateConfiguration(): CompletableFuture<Result<TrailsSettings>> {
-        val owner = generation ?: return CompletableFuture.completedFuture(Result.failure(IllegalStateException("Trails is closed")))
+        if (pluginRuntime == null) return CompletableFuture.completedFuture(Result.failure(IllegalStateException("Trails is closed")))
         val activeConfiguration = configuration
-        return owner.worker.submit { runCatching { activeConfiguration.load(reload = true).settings } }
+        return storage.submit { runCatching { activeConfiguration.load(reload = true).settings } }
     }
 
     fun showStatus(sender: CommandSender) {
@@ -332,7 +324,7 @@ open class TrailsPlugin : JavaPlugin() {
         movementDirection: BlockFace? = null,
     ) {
         if (!ready) return
-        val owner = generation ?: return
+        val lifecycle = pluginRuntime ?: return
         val store = blockStore
         val service = trailService
         val configuration = settings
@@ -340,26 +332,26 @@ open class TrailsPlugin : JavaPlugin() {
         val worldId = player.world.uid
         val sprinting = player.isSprinting
         val sneaking = player.isSneaking
-        val version = owner.movementSequence.incrementAndGet()
-        owner.movementVersions[playerId] = version
-        val previous = owner.movements[playerId]
+        val version = movementSequence.incrementAndGet()
+        movementVersions[playerId] = version
+        val previous = movements[playerId]
         if (store.isSettled(block.chunk) && (previous == null || previous.isDone)) {
             measureMovement { handleMovementMeasured(player, block, createTrail, movementDirection, true, sprinting, sneaking) }
-            owner.movementVersions.remove(playerId, version)
+            movementVersions.remove(playerId, version)
             return
         }
         val guard = store.mutationGuard(block)
         val pending = store.whenReady(block.chunk, guard, previous) {
-            if (ready && generation === owner && blockStore === store && trailService === service &&
+            if (ready && pluginRuntime === lifecycle && blockStore === store && trailService === service &&
                 settings === configuration && player.isOnline && player.world.uid == worldId) {
                 measureMovement { handleMovementMeasured(player, block, createTrail, movementDirection,
-                    owner.movementVersions[playerId] == version, sprinting, sneaking) }
+                    movementVersions[playerId] == version, sprinting, sneaking) }
             }
         }
-        owner.movements[playerId] = pending
+        movements[playerId] = pending
         pending.whenComplete { _, _ ->
-            owner.movements.remove(playerId, pending)
-            owner.movementVersions.remove(playerId, version)
+            movements.remove(playerId, pending)
+            movementVersions.remove(playerId, version)
         }
     }
 
@@ -503,14 +495,14 @@ open class TrailsPlugin : JavaPlugin() {
 
     fun forceTrail(player: Player, block: Block, stillAuthorized: () -> Boolean = { true }) {
         if (!ready || !stillAuthorized()) return
-        val owner = generation ?: return
+        val lifecycle = pluginRuntime ?: return
         val store = blockStore
         val service = trailService
         val playerWorld = player.world.uid
         if (!store.isSettled(block.chunk)) {
             val guard = store.mutationGuard(block)
             store.whenReady(block.chunk, guard) {
-                if (ready && generation === owner && blockStore === store && trailService === service &&
+                if (ready && pluginRuntime === lifecycle && blockStore === store && trailService === service &&
                     player.isOnline && player.world.uid == playerWorld && stillAuthorized()) forceTrailPrepared(player, block)
             }
             return
@@ -585,13 +577,13 @@ open class TrailsPlugin : JavaPlugin() {
 
     fun showTrailInfo(player: Player, block: Block, stillAuthorized: () -> Boolean = { true }) {
         if (!ready || !stillAuthorized()) return
-        val owner = generation ?: return
+        val lifecycle = pluginRuntime ?: return
         val store = blockStore
         val service = trailService
         val playerWorld = player.world.uid
         if (!store.isSettled(block.chunk)) {
             store.whenReady(block.chunk) {
-                if (ready && generation === owner && blockStore === store && trailService === service &&
+                if (ready && pluginRuntime === lifecycle && blockStore === store && trailService === service &&
                     player.isOnline && player.world.uid == playerWorld && stillAuthorized()) showTrailInfoPrepared(player, block)
             }
             return
@@ -771,14 +763,14 @@ open class TrailsPlugin : JavaPlugin() {
     fun toolLabel(kind: TrailToolKind): String = locale.plain("tools.${kind.id}.label")
 
     fun showTrails(player: Player, radius: Double) {
-        val owner = generation ?: return
+        val lifecycle = pluginRuntime ?: return
         if (!ready) return
         val selected = settings
         val viewer = player.uniqueId
         trailVisibility.show(viewer, radius, selected.particle) {
-            generation === owner && ready && settings === selected && player.isOnline && player.hasPermission("trails.show")
+            pluginRuntime === lifecycle && ready && settings === selected && player.isOnline && player.hasPermission("trails.show")
         }.whenComplete { _, failure ->
-            if (failure != null && generation === owner && ready && failure.cause !is java.util.concurrent.CancellationException)
+            if (failure != null && pluginRuntime === lifecycle && ready && failure.cause !is java.util.concurrent.CancellationException)
                 logger.fine("Trail visibility for $viewer ended: ${failure.message}")
         }
     }

@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.15"
+version = "2.3.16"
 
 repositories {
     mavenCentral()
@@ -254,11 +254,11 @@ val verifyE2eProvider = tasks.register("verifyE2eProvider") {
     inputs.file(e2eArcCoreJar).optional()
     doLast {
         val provider = requireNotNull(e2eArcCoreJar.orNull) {
-            "Supply -Pe2eArcCoreJar=/absolute/path/ArcCore-0.1.12.jar for the real Paper fixture"
+            "Supply -Pe2eArcCoreJar=/absolute/path/ArcCore-0.1.13.jar for the real Paper fixture"
         }
         val digest = MessageDigest.getInstance("SHA-256").digest(provider.readBytes()).joinToString("") { "%02x".format(it) }
-        require(digest == "93158072f30ad3d7d5201acdf9036324841c4455844b4f1b650cfea0d8540502") {
-            "ArcCore 0.1.12 fixture checksum mismatch: $digest"
+        require(digest == "952cca75616a433f7ee02ea0a0d078b4b88291dafd62e7acb415be3952dbef10") {
+            "ArcCore 0.1.13 fixture checksum mismatch: $digest"
         }
     }
 }
