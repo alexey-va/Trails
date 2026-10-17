@@ -165,6 +165,7 @@ class TrailServiceTest :
             every { chunk.world } returns world
             every { chunk.x } returns 1
             every { chunk.z } returns -1
+            every { chunk.chunkKey } returns ((-1L shl 32) or 1L)
 
             service.walk(player, block, sprintModifier = 1.0)
             service.lastActivityMillis(block) shouldBe 1_000L
@@ -178,6 +179,11 @@ class TrailServiceTest :
             val center = mockk<Block>(relaxed = true)
             val north = mockk<Block>(relaxed = true)
             val south = mockk<Block>(relaxed = true)
+            val world = mockk<World>(relaxed = true)
+            every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
+            every { center.world } returns world
+            every { north.world } returns world
+            every { south.world } returns world
             every { center.type } returns Material.DIRT_PATH
             every { north.type } returns Material.GRASS_BLOCK
             every { south.type } returns Material.GRASS_BLOCK
@@ -324,4 +330,6 @@ private class InMemoryTrailBlockStore : TrailBlockStore {
         chunk: Chunk,
         limit: Int,
     ): Collection<Block> = emptyList()
+
+    override fun nextTrackedBlock(chunk: Chunk, afterPosition: Int?): Pair<Int, Block>? = null
 }

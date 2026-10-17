@@ -9,6 +9,7 @@ import org.bukkit.entity.Player
 import net.kyori.adventure.text.Component
 import ru.ruscrafting.trails.TrailsPlugin
 import ru.ruscrafting.trails.TrailsPlugin.PlayerTarget
+import ru.arc.core.whenCompleteSync
 
 class TrailsCommand(
     private val plugin: TrailsPlugin,
@@ -208,10 +209,11 @@ class TrailsCommand(
     private fun reload(sender: CommandSender, count: Int) {
         if (count != 1) return plugin.message(sender, "messages.tooManyArgs")
         if (!sender.hasPermission("trails.reload")) return plugin.message(sender, "messages.reloadNoPerm")
-        plugin.reloadTrails().onSuccess {
-            plugin.message(sender, "messages.reload")
-        }.onFailure { error ->
-            plugin.message(sender, "messages.reloadFailed", mapOf("%error%" to (error.message ?: error.javaClass.simpleName)))
+        plugin.reloadTrails().whenCompleteSync(plugin.tasks()) { result, failure ->
+            val completed = result ?: Result.failure(failure ?: IllegalStateException("Reload did not complete"))
+            completed.onSuccess { plugin.message(sender, "messages.reload") }.onFailure { error ->
+                plugin.message(sender, "messages.reloadFailed", mapOf("%error%" to (error.message ?: error.javaClass.simpleName)))
+            }
         }
     }
 
@@ -224,8 +226,9 @@ class TrailsCommand(
     private fun validate(sender: CommandSender, count: Int) {
         if (count != 1) return plugin.message(sender, "messages.tooManyArgs")
         if (!sender.hasPermission("trails.validate")) return plugin.message(sender, "messages.noPerm")
-        plugin.validateConfiguration()
-            .onSuccess { settings ->
+        plugin.validateConfiguration().whenCompleteSync(plugin.tasks()) { result, failure ->
+            val completed = result ?: Result.failure(failure ?: IllegalStateException("Validation did not complete"))
+            completed.onSuccess { settings ->
                 plugin.message(
                     sender,
                     "messages.validateOk",
@@ -238,6 +241,7 @@ class TrailsCommand(
                     mapOf("%error%" to (error.message ?: error.javaClass.simpleName)),
                 )
             }
+        }
     }
 
     private fun give(sender: CommandSender, args: List<String>) {
@@ -284,14 +288,31 @@ class TrailsCommand(
                 }
                 else -> return plugin.message(sender, "messages.wrongArgs")
             }
+        if (action == "commit" || action == "undo") {
+            val authorized = {
+                canUseRoads(sender) && target.isOnline &&
+                    (sender !is Player || sender.isOnline) &&
+                    (target === sender || sender.hasPermission(ROADS_MANAGE_PERMISSION))
+            }
+            val result = if (action == "commit") plugin.roadCommit(target, authorized) else plugin.roadUndo(target, authorized)
+            result.whenCompleteSync(plugin.tasks()) { value, failure ->
+                if (authorized()) sendRoadResult(sender, target, action, value ?: RoadResult(
+                    if (action == "commit") "messages.roadCommitFailed" else "messages.roadUndoFailed",
+                ))
+                if (failure != null) plugin.logger.warning("Road $action failed: ${failure.message}")
+            }
+            return
+        }
         val result =
             when (action) {
                 "start" -> plugin.roadStart(target, args[1])
-                "commit" -> plugin.roadCommit(target)
                 "cancel" -> plugin.roadCancel(target)
-                "undo" -> plugin.roadUndo(target)
                 else -> plugin.roadStatus(target)
             }
+        sendRoadResult(sender, target, action, result)
+    }
+
+    private fun sendRoadResult(sender: CommandSender, target: Player, action: String, result: RoadResult) {
         val messages = result.notices + RoadNotice(result.message, result.replacements)
         messages.forEach { notice ->
             val replacements = notice.replacements + ("%name%" to target.name)
@@ -311,11 +332,17 @@ class TrailsCommand(
             }
             "inspect" -> {
                 val block = debugBlock(sender, args.drop(1)) ?: return
-                sender.sendMessage(Component.text(plugin.debugInspect(block)))
+                plugin.awaitTrailData(block.chunk).whenCompleteSync(plugin.tasks()) { _, failure ->
+                    if (failure == null && sender.hasPermission(DEBUG_PERMISSION) && debugDataCurrent(block))
+                        sender.sendMessage(Component.text(plugin.debugInspect(block)))
+                }
             }
             "decay" -> {
                 val block = debugBlock(sender, args.drop(1)) ?: return
-                sender.sendMessage(Component.text(plugin.debugDecay(block)))
+                plugin.awaitTrailData(block.chunk).whenCompleteSync(plugin.tasks()) { _, failure ->
+                    if (failure == null && sender.hasPermission(DEBUG_PERMISSION) && debugDataCurrent(block))
+                        sender.sendMessage(Component.text(plugin.debugDecay(block)))
+                }
             }
             "pulse" -> {
                 if (args.size !in 2..3) return plugin.message(sender, "messages.wrongArgs")
@@ -334,11 +361,19 @@ class TrailsCommand(
                         sender is Player -> sender
                         else -> return sender.sendMessage(Component.text("TRAILS_DEBUG error=online_player_required"))
                     }
-                sender.sendMessage(Component.text(plugin.debugPulse(player, count)))
+                val block = player.location.clone().subtract(0.0, 0.1, 0.0).block
+                plugin.awaitTrailData(block.chunk).whenCompleteSync(plugin.tasks()) { _, failure ->
+                    if (failure == null && player.isOnline && sender.hasPermission(DEBUG_PERMISSION) && debugDataCurrent(block) &&
+                        player.location.clone().subtract(0.0, 0.1, 0.0).block == block)
+                        sender.sendMessage(Component.text(plugin.debugPulse(player, count)))
+                }
             }
             else -> plugin.message(sender, "messages.wrongArgs")
         }
     }
+
+    private fun debugDataCurrent(block: Block): Boolean =
+        block.world.isChunkLoaded(block.x shr 4, block.z shr 4) && plugin.trailDataReady(block)
 
     private fun debugBlock(sender: CommandSender, args: List<String>): Block? {
         if (args.isEmpty()) {

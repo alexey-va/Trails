@@ -14,6 +14,7 @@ import ru.ruscrafting.trails.domain.TrailProgressEngine
 import ru.ruscrafting.trails.domain.TrailStage
 import ru.ruscrafting.trails.storage.TrailBlockState
 import ru.ruscrafting.trails.storage.TrailBlockStore
+import ru.ruscrafting.trails.storage.TrailBlockPosition
 import java.util.UUID
 import kotlin.random.Random
 
@@ -28,7 +29,7 @@ class TrailService(
     },
 ) {
     private val progress = TrailProgressEngine(catalog)
-    private val activity = mutableMapOf<TrailBlockKey, Long>()
+    private val activity = mutableMapOf<TrailActivityChunk, MutableMap<Int, Long>>()
 
     fun movementContext(block: Block): TrailMovementContext {
         val stored = store.read(block)
@@ -46,9 +47,10 @@ class TrailService(
         forced: Boolean = false,
         popularThreshold: Int? = null,
         wideningDirection: BlockFace? = null,
+        sprinting: Boolean = player.isSprinting,
         canChange: (Block, Material) -> Boolean = { _, _ -> true },
     ): TrailWalkResult =
-        walk(player, movementContext(block), sprintModifier, forced, popularThreshold, wideningDirection, canChange)
+        walk(player, movementContext(block), sprintModifier, forced, popularThreshold, wideningDirection, sprinting, canChange)
 
     fun walk(
         player: Player,
@@ -57,6 +59,7 @@ class TrailService(
         forced: Boolean = false,
         popularThreshold: Int? = null,
         wideningDirection: BlockFace? = null,
+        sprinting: Boolean = player.isSprinting,
         canChange: (Block, Material) -> Boolean = { _, _ -> true },
     ): TrailWalkResult {
         val stored = context.stored
@@ -68,7 +71,7 @@ class TrailService(
                     stage = stage,
                     currentWalks = previousWalks,
                     randomPercent = randomPercent(),
-                    sprintModifier = if (player.isSprinting) sprintModifier else 1.0,
+                    sprintModifier = if (sprinting) sprintModifier else 1.0,
                     forced = forced,
                     popularThreshold = popularThreshold,
                 )
@@ -114,6 +117,10 @@ class TrailService(
         fraction: Double,
         canChange: (Material) -> Boolean = { true },
     ): Boolean {
+        if (!store.isReady(block.chunk)) {
+            store.prepare(block.chunk)
+            return false
+        }
         val stored = store.read(block) ?: return false
         val stage = catalog.resolve(block.type.name, stored.identity, environmentOf(block)) ?: return false
         return when (val decision = progress.decay(stage, stored.walks, fraction)) {
@@ -158,6 +165,12 @@ class TrailService(
         limit: Int = Int.MAX_VALUE,
     ): Collection<Block> = store.trackedBlocks(chunk, limit)
 
+    fun nextTrackedBlock(chunk: Chunk, afterPosition: Int?): Pair<Int, Block>? = store.nextTrackedBlock(chunk, afterPosition)
+
+    fun isChunkReady(chunk: Chunk): Boolean = store.isReady(chunk)
+
+    fun prepareChunk(chunk: Chunk) = store.prepare(chunk)
+
     fun inspect(block: Block): TrailBlockState? = store.read(block)
 
     fun inspection(block: Block): TrailInspection? {
@@ -169,30 +182,38 @@ class TrailService(
     fun next(stage: TrailStage): TrailStage? = catalog.next(stage)
 
     fun clear(block: Block) {
-        activity.remove(key(block))
+        forgetActivity(block.world.uid, chunkKey(block), position(block))
         store.clear(block)
     }
 
-    fun lastActivityMillis(block: Block): Long? = activity[key(block)]
+    fun lastActivityMillis(block: Block): Long? = activity[activityChunk(block)]?.get(position(block))
 
     /** Activity timestamps are only meaningful while the corresponding chunk remains loaded. */
     fun forgetActivity(chunk: Chunk) {
-        val world = chunk.world.uid
-        activity.keys.removeIf { key ->
-            key.world == world && key.x shr 4 == chunk.x && key.z shr 4 == chunk.z
-        }
+        activity.remove(TrailActivityChunk(chunk.world.uid, chunk.chunkKey))
+    }
+
+    internal fun forgetActivity(worldId: UUID, chunkKey: Long, position: Int) {
+        val key = TrailActivityChunk(worldId, chunkKey)
+        val values = activity[key] ?: return
+        values.remove(position)
+        if (values.isEmpty()) activity.remove(key)
     }
 
     fun isDecayEdge(block: Block): Boolean {
         val center = store.read(block) ?: return false
         val stage = catalog.resolve(block.type.name, center.identity, environmentOf(block)) ?: return false
-        val connected =
-            CARDINAL_FACES.count { face ->
-                val neighbour = block.getRelative(face)
-                if (!neighbour.world.isChunkLoaded(neighbour.x shr 4, neighbour.z shr 4)) return@count false
-                val neighbourState = store.read(neighbour) ?: return@count false
-                catalog.resolve(neighbour.type.name, neighbourState.identity, environmentOf(neighbour))?.trailName == stage.trailName
+        var connected = 0
+        CARDINAL_FACES.forEach { face ->
+            val neighbour = block.getRelative(face)
+            if (!neighbour.world.isChunkLoaded(neighbour.x shr 4, neighbour.z shr 4)) return@forEach
+            if (!store.isReady(neighbour.chunk)) {
+                store.prepare(neighbour.chunk)
+                return false
             }
+            val neighbourState = store.read(neighbour) ?: return@forEach
+            if (catalog.resolve(neighbour.type.name, neighbourState.identity, environmentOf(neighbour))?.trailName == stage.trailName) connected++
+        }
         return connected <= 1
     }
 
@@ -202,12 +223,12 @@ class TrailService(
     ) {
         val sources = blocks.distinct()
         val movements = sources.mapNotNull { block -> store.read(block)?.let { block.getRelative(direction) to it } }
-        val activityMovements = sources.mapNotNull { block -> activity[key(block)]?.let { block.getRelative(direction) to it } }
+        val activityMovements = sources.mapNotNull { block -> lastActivityMillis(block)?.let { block.getRelative(direction) to it } }
         val destinations = sources.map { it.getRelative(direction) }
         (sources + destinations).distinct().forEach(store::clear)
         movements.forEach { (block, state) -> store.write(block, state) }
-        (sources + destinations).forEach { activity.remove(key(it)) }
-        activityMovements.forEach { (block, timestamp) -> activity[key(block)] = timestamp }
+        (sources + destinations).forEach { forgetActivity(it.world.uid, chunkKey(it), position(it)) }
+        activityMovements.forEach { (block, timestamp) -> activity.getOrPut(activityChunk(block)) { mutableMapOf() }[position(block)] = timestamp }
     }
 
     fun placeRoad(
@@ -259,6 +280,13 @@ class TrailService(
                 else -> return emptyList()
             }
         val shoulders = faces.map(center::getRelative)
+        shoulders.forEach { shoulder ->
+            if (!shoulder.world.isChunkLoaded(shoulder.x shr 4, shoulder.z shr 4)) return emptyList()
+            if (!store.isReady(shoulder.chunk)) {
+                store.prepare(shoulder.chunk)
+                return emptyList()
+            }
+        }
         val target = Material.valueOf(previous.material)
         if (shoulders.any { shoulder ->
                 store.read(shoulder) != null ||
@@ -277,10 +305,12 @@ class TrailService(
     }
 
     private fun recordActivity(block: Block) {
-        activity[key(block)] = currentTimeMillis()
+        activity.getOrPut(activityChunk(block)) { mutableMapOf() }[position(block)] = currentTimeMillis()
     }
 
-    private fun key(block: Block): TrailBlockKey = TrailBlockKey(block.world.uid, block.x, block.y, block.z)
+    private fun activityChunk(block: Block): TrailActivityChunk = TrailActivityChunk(block.world.uid, chunkKey(block))
+    private fun chunkKey(block: Block): Long = ((block.x shr 4).toLong() and 0xffff_ffffL) or ((block.z shr 4).toLong() shl 32)
+    private fun position(block: Block): Int = TrailBlockPosition.pack(block.x and 15, block.y, block.z and 15)
 
     private fun changeMaterial(actor: String, block: Block, material: Material) {
         val before = block.state
@@ -338,9 +368,7 @@ data class TrailInspection(
     val walks: Int,
 )
 
-private data class TrailBlockKey(
+private data class TrailActivityChunk(
     val world: UUID,
-    val x: Int,
-    val y: Int,
-    val z: Int,
+    val chunkKey: Long,
 )

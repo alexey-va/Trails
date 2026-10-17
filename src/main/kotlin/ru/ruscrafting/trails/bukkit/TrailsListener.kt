@@ -58,7 +58,7 @@ class TrailsListener(
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onBreak(event: BlockBreakEvent) {
-        plugin.clearTrailData(event.block)
+        if (!plugin.isProtectionProbe(event) && !plugin.clearTrailData(event.block)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -66,63 +66,75 @@ class TrailsListener(
         // BukkitEventProtection sends an unchanged BlockPlaceEvent as a compatibility probe.
         // Only a real replacement should invalidate persisted trail state.
         if (event.blockPlaced.blockData == event.blockReplacedState.blockData) return
-        plugin.clearTrailData(event.blockPlaced)
+        if (!plugin.isProtectionProbe(event) && !plugin.clearTrailData(event.blockPlaced)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onBurn(event: BlockBurnEvent) {
-        plugin.clearTrailData(event.block)
+        if (!plugin.isProtectionProbe(event) && !plugin.clearTrailData(event.block)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onFade(event: BlockFadeEvent) {
-        plugin.clearTrailData(event.block)
+        if (!plugin.isProtectionProbe(event) && !plugin.clearTrailData(event.block)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onForm(event: BlockFormEvent) {
-        plugin.clearTrailData(event.block)
+        if (!plugin.isProtectionProbe(event) && !plugin.clearTrailData(event.block)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onLeavesDecay(event: LeavesDecayEvent) {
-        plugin.clearTrailData(event.block)
+        if (!plugin.isProtectionProbe(event) && !plugin.clearTrailData(event.block)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onFertilize(event: BlockFertilizeEvent) {
-        event.blocks.forEach { plugin.clearTrailData(it.block) }
+        if (!plugin.clearTrailData(event.blocks) { it.block }) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onStructureGrow(event: StructureGrowEvent) {
-        event.blocks.forEach { plugin.clearTrailData(it.block) }
+        if (!plugin.clearTrailData(event.blocks) { it.block }) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onEntityChangeBlock(event: EntityChangeBlockEvent) {
         if (event.entity is Player) return
-        plugin.clearTrailData(event.block)
+        if (!plugin.isProtectionProbe(event) && !plugin.clearTrailData(event.block)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onBlockExplosion(event: BlockExplodeEvent) {
-        event.blockList().forEach(plugin::clearTrailData)
+        if (!plugin.clearTrailData(event.blockList()) { it }) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onEntityExplosion(event: EntityExplodeEvent) {
-        event.blockList().forEach(plugin::clearTrailData)
+        if (!plugin.clearTrailData(event.blockList()) { it }) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onPistonExtend(event: BlockPistonExtendEvent) {
-        plugin.moveTrailData(event.blocks, event.direction)
+        // Keep the atomic warm event seam: pinned Purpur 1.21.11 with push limit 12
+        // bounds moved+broken graph references (not just moved blocks). No new list cap.
+        if (!plugin.moveTrailData(event.blocks, event.direction)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onPistonRetract(event: BlockPistonRetractEvent) {
-        plugin.moveTrailData(event.blocks, event.direction.oppositeFace)
+        if (!plugin.moveTrailData(event.blocks, event.direction.oppositeFace)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun preparePistonExtend(event: BlockPistonExtendEvent) {
+        if (!plugin.canMoveTrailData(event.blocks, event.direction)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun preparePistonRetract(event: BlockPistonRetractEvent) {
+        if (!plugin.canMoveTrailData(event.blocks, event.direction.oppositeFace)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -132,7 +144,13 @@ class TrailsListener(
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onSpread(event: BlockSpreadEvent) {
-        if (event.newState.type == Material.GRASS_BLOCK && plugin.inspectTrail(event.block) != null) {
+        if (event.newState.type != Material.GRASS_BLOCK) return
+        if (!plugin.trailDataReady(event.block)) {
+            plugin.prepareTrailData(event.block)
+            event.isCancelled = true
+            return
+        }
+        if (plugin.inspectTrail(event.block) != null) {
             event.isCancelled = plugin.decayBlock(event.block)
         }
     }
@@ -143,6 +161,7 @@ class TrailsListener(
         val item = event.item ?: return
         val block = event.clickedBlock ?: return
         val toolKind = plugin.toolKind(item) ?: return
+        val player = event.player
         // Tagged Trails tools are dedicated controls. Cancel their vanilla interaction even when
         // the holder lacks permission so an inspection stick cannot also open or toggle a block.
         event.setUseInteractedBlock(Event.Result.DENY)
@@ -150,11 +169,11 @@ class TrailsListener(
         when (toolKind) {
             TrailToolKind.ADVANCE -> {
                 if (!event.player.hasPermission("trails.trail-tool")) return
-                plugin.forceTrail(event.player, block)
+                plugin.forceTrail(player, block) { player.hasPermission("trails.trail-tool") }
             }
             TrailToolKind.INSPECT -> {
                 if (!event.player.hasPermission("trails.info-tool")) return
-                plugin.showTrailInfo(event.player, block)
+                plugin.showTrailInfo(player, block) { player.hasPermission("trails.info-tool") }
             }
         }
     }

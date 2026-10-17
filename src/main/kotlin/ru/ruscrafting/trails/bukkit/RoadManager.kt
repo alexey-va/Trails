@@ -19,6 +19,8 @@ import ru.ruscrafting.trails.storage.RoadCommitRecord
 import ru.ruscrafting.trails.storage.RoadHistoryStore
 import ru.ruscrafting.trails.storage.TrailBlockState
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.function.BooleanSupplier
 import kotlin.math.abs
 
 data class RoadNotice(
@@ -37,22 +39,36 @@ class RoadManager internal constructor(
     initialSettings: RoadSettings,
     private val clockMillis: () -> Long = System::currentTimeMillis,
     private val previewSelector: RoadPreviewSelector = RoadPreviewSelector(),
+    private val historyStore: RoadHistoryStore = RoadHistoryStore(plugin.dataFolder.toPath()),
+    initialHistory: LinkedHashMap<UUID, RoadCommitRecord>? = null,
 ) {
     private var settings = initialSettings
     private var surfacePolicy = RoadSurfacePolicy(initialSettings)
-    private val sessions = mutableMapOf<UUID, Session>()
-    private val historyStore = RoadHistoryStore(plugin.dataFolder.toPath())
+    private var sessions = mutableMapOf<UUID, Session>()
+    private val nativeWork = plugin.nativeWork()
+    private val cleanup = plugin.nativeCleanup()
+    private val previews = RoadPreviewController(plugin.server, nativeWork, cleanup, previewSelector)
+    private var pendingMutations = mutableSetOf<UUID>()
+    private var pendingLoads = mutableMapOf<UUID, Pair<World, Set<Pair<Int, Int>>>>()
+    private var closeCompletion: CompletableFuture<Void>? = null
+    private var closed = false
     private val history =
-        runCatching(historyStore::load).getOrElse { error ->
+        initialHistory ?: runCatching(historyStore::load).getOrElse { error ->
             plugin.logger.warning("Could not load road-history.yml; undo history starts empty: ${error.message}")
             linkedMapOf()
         }
 
     fun reconfigure(newSettings: RoadSettings) {
-        sessions.entries.toList().forEach { (uuid, session) ->
-            plugin.server.getPlayer(uuid)?.let { cancelPreview(it, session) }
+        val detached = sessions
+        sessions = mutableMapOf()
+        val entries = detached.entries.iterator()
+        plugin.nativeWork().submit({ !closed }) {
+            if (!entries.hasNext()) true else {
+                val entry = entries.next()
+                if (sessions[entry.key] == null) previews.cancel(entry.key)
+                false
+            }
         }
-        sessions.clear()
         settings = newSettings
         surfacePolicy = RoadSurfacePolicy(newSettings)
     }
@@ -97,6 +113,7 @@ class RoadManager internal constructor(
         location: Location,
     ): Boolean {
         val session = sessions[player.uniqueId] ?: return false
+        if (session.committing) return true
         if (player.isFlying && !settings.captureWhileFlying) return true
         if (expired(session) || location.world?.uid != session.worldId) {
             cancel(player)
@@ -134,20 +151,39 @@ class RoadManager internal constructor(
         return true
     }
 
-    fun commit(player: Player): RoadResult {
-        val session = sessions[player.uniqueId] ?: return RoadResult("messages.roadNoSession")
+    fun commit(player: Player, stillAuthorized: () -> Boolean = { true }): CompletableFuture<RoadResult> {
+        val playerId = player.uniqueId
+        val session = sessions[playerId] ?: return completed("messages.roadNoSession")
         if (expired(session)) {
             cancel(player)
-            return RoadResult("messages.roadExpired")
+            return completed("messages.roadExpired")
         }
-        val world = plugin.server.getWorld(session.worldId) ?: return RoadResult("messages.roadConflict")
-        if (player.world.uid != session.worldId) return RoadResult("messages.roadConflict")
-        val loadedChunks = loadPreviewedChunks(world, session.planned) ?: return RoadResult("messages.roadConflict")
-        try {
-            return commitCurrentPlan(player, session, world)
-        } finally {
+        val world = plugin.server.getWorld(session.worldId) ?: return completed("messages.roadConflict")
+        if (player.world.uid != session.worldId || !pendingMutations.add(playerId)) return completed("messages.roadConflict")
+        val loadedChunks = loadPreviewedChunks(world, session.planned) ?: run {
+            pendingMutations.remove(playerId)
+            return completed("messages.roadConflict")
+        }
+        pendingLoads[playerId] = world to loadedChunks
+        try { rebuildPlan(player, session, preserveBaseline = false) } catch (error: Throwable) {
+            pendingLoads.remove(playerId)
+            pendingMutations.remove(playerId)
             releaseLoadedChunks(world, loadedChunks)
+            return CompletableFuture.failedFuture(error)
         }
+        session.committing = true
+        val plan = session.planned
+        return afterMetadataReady(player, world, plan.keys.iterator(), "messages.roadConflict", {
+            sessions[playerId] === session && session.planned === plan && stillAuthorized()
+        }) { commitCurrentPlan(player, session, world) }.handle { result, failure -> result to failure }.thenCompose { (result, failure) ->
+            nativeWork.call({ !closed }) {
+                session.committing = false
+                pendingMutations.remove(playerId)
+                pendingLoads.remove(playerId)?.let { (loadedWorld, chunks) -> releaseLoadedChunks(loadedWorld, chunks) }
+                if (failure != null) throw failure
+                requireNotNull(result)
+            }
+        }.copy()
     }
 
     private fun commitCurrentPlan(
@@ -155,7 +191,6 @@ class RoadManager internal constructor(
         session: Session,
         world: World,
     ): RoadResult {
-        rebuildPlan(player, session, preserveBaseline = false)
         if (session.planned.isEmpty()) return RoadResult("messages.roadEmpty")
         val resolved = session.planned.values.mapNotNull { resolve(world, it) }
         if (resolved.size != session.planned.size || resolved.any { !validCurrent(it, session.planned) }) {
@@ -220,10 +255,7 @@ class RoadManager internal constructor(
             return RoadResult("messages.roadCommitFailed")
         }
         sessions.remove(player.uniqueId)
-        applied.forEach { change ->
-            val block = world.getBlockAt(change.x, change.y, change.z)
-            player.sendBlockChange(block.location, block.blockData)
-        }
+        previews.cancel(player.uniqueId)
         val notices =
             if (compensateRemovedBlocks) {
                 val delivery = RoadBlockCompensation.deliver(player, removedMaterials)
@@ -263,7 +295,60 @@ class RoadManager internal constructor(
         sessions.remove(player.uniqueId)?.let { cancelPreview(player, it) }
     }
 
-    fun undo(player: Player): RoadResult {
+    fun undo(player: Player, stillAuthorized: () -> Boolean = { true }): CompletableFuture<RoadResult> {
+        val playerId = player.uniqueId
+        val commit = history[playerId] ?: return completed("messages.roadNothingToUndo")
+        val world = plugin.server.getWorld(commit.worldId) ?: return completed("messages.roadUndoConflict")
+        if (player.world.uid != world.uid) return completed("messages.roadUndoWrongWorld")
+        if (!pendingMutations.add(playerId)) return completed("messages.roadUndoConflict")
+        val positions = commit.blocks.asSequence().map { BlockKey(it.x, it.y, it.z) }.iterator()
+        return afterMetadataReady(player, world, positions, "messages.roadUndoConflict", {
+            history[playerId] === commit && stillAuthorized()
+        }) { undoCurrent(player) }.handle { result, failure -> result to failure }.thenCompose { (result, failure) ->
+            nativeWork.call({ !closed }) {
+                pendingMutations.remove(playerId)
+                if (failure != null) throw failure
+                requireNotNull(result)
+            }
+        }.copy()
+    }
+
+    /** Compatibility bridge only: the existing road transaction body remains native and indivisible. */
+    private fun afterMetadataReady(
+        player: Player,
+        world: World,
+        positions: Iterator<BlockKey>,
+        conflict: String,
+        isCurrent: () -> Boolean,
+        operation: () -> RoadResult,
+    ): CompletableFuture<RoadResult> {
+        val chunks = linkedSetOf<Pair<Int, Int>>()
+        val readiness = mutableListOf<CompletableFuture<Unit>>()
+        var loaded = true
+        return nativeWork.submit({ !closed }) {
+            if (!isCurrent() || !player.isOnline || player.world.uid != world.uid) {
+                loaded = false
+                true
+            } else if (!positions.hasNext()) true else {
+                val position = positions.next()
+                val chunk = position.x.shr(4) to position.z.shr(4)
+                if (chunks.add(chunk)) {
+                    if (!world.isChunkLoaded(chunk.first, chunk.second)) loaded = false
+                    else readiness += plugin.awaitTrailData(world.getChunkAt(chunk.first, chunk.second, false))
+                }
+                false
+            }
+        }.thenCompose { CompletableFuture.allOf(*readiness.toTypedArray()) }.handle { _, failure -> failure }
+            .thenCompose { failure -> nativeWork.call({ !closed }) {
+                if (failure != null || !loaded || !isCurrent() || !player.isOnline || player.world.uid != world.uid ||
+                    chunks.any { (x, z) -> !world.isChunkLoaded(x, z) || !plugin.trailDataReady(world.getBlockAt(x shl 4, world.minHeight, z shl 4)) }
+                ) RoadResult(conflict) else operation()
+            } }
+    }
+
+    private fun completed(message: String) = CompletableFuture.completedFuture(RoadResult(message))
+
+    private fun undoCurrent(player: Player): RoadResult {
         val commit = history[player.uniqueId] ?: return RoadResult("messages.roadNothingToUndo")
         val world = plugin.server.getWorld(commit.worldId) ?: return RoadResult("messages.roadUndoConflict")
         if (player.world.uid != world.uid) return RoadResult("messages.roadUndoWrongWorld")
@@ -353,11 +438,39 @@ class RoadManager internal constructor(
         }
     }
 
-    fun close() {
-        sessions.entries.toList().forEach { (uuid, session) ->
-            plugin.server.getPlayer(uuid)?.let { cancelPreview(it, session) }
-        }
-        sessions.clear()
+    fun close() { closeAsync() }
+
+    fun closeAsync(): CompletableFuture<Void> {
+        closeCompletion?.let { return it.copy() }
+        closed = true
+        sessions = mutableMapOf()
+        val loads = pendingLoads.values.iterator()
+        pendingLoads = mutableMapOf()
+        pendingMutations = mutableSetOf()
+        var current: Pair<World, Set<Pair<Int, Int>>>? = null
+        var coordinates: Iterator<Pair<Int, Int>> = emptyList<Pair<Int, Int>>().iterator()
+        var releaseFailure: Throwable? = null
+        val releases = runCatching { cleanup.submit("Trails-road-chunks", BooleanSupplier {
+            if (coordinates.hasNext()) {
+                val (x, z) = coordinates.next()
+                try { requireNotNull(current).first.unloadChunkRequest(x, z) } catch (error: Throwable) {
+                    val first = releaseFailure
+                    if (first == null) releaseFailure = error else if (first !== error) first.addSuppressed(error)
+                }
+                false
+            } else if (loads.hasNext()) {
+                current = loads.next()
+                coordinates = requireNotNull(current).second.iterator()
+                false
+            } else {
+                releaseFailure?.let { throw it }
+                true
+            }
+        }).toCompletableFuture() }.getOrElse { CompletableFuture.failedFuture(it) }
+        val previewCleanup = runCatching(previews::closeAsync).getOrElse { CompletableFuture.failedFuture(it) }
+        val actual = CompletableFuture.allOf(previewCleanup, releases)
+        closeCompletion = actual
+        return actual.copy()
     }
 
     private fun rebuildPlan(
@@ -367,7 +480,7 @@ class RoadManager internal constructor(
     ) {
         val draft =
             PlanDraft(
-                baseline = if (preserveBaseline) LinkedHashMap(session.planned) else emptyMap(),
+                baseline = if (preserveBaseline) session.planned else emptyMap(),
             )
         val sections = session.routeSections.map { section -> resolveSection(player.world, session.profile, section) }
 
@@ -402,9 +515,8 @@ class RoadManager internal constructor(
             rows.forEach { row -> planPatterns(player, session, draft, roadColumns, row) }
         }
 
-        updatePreview(player, session.planned, draft.planned)
-        session.planned.clear()
-        session.planned.putAll(draft.planned)
+        session.planned = draft.planned
+        updatePreview(player, session, draft.planned)
         session.capped = draft.capped
         session.dirty = false
     }
@@ -413,7 +525,7 @@ class RoadManager internal constructor(
         player: Player,
         session: Session,
     ) {
-        if (session.dirty) rebuildPlan(player, session)
+        if (session.dirty && !session.committing) rebuildPlan(player, session)
     }
 
     private fun resolveSection(
@@ -677,26 +789,17 @@ class RoadManager internal constructor(
 
     private fun updatePreview(
         player: Player,
-        previous: Map<BlockKey, PlannedBlock>,
+        session: Session,
         current: Map<BlockKey, PlannedBlock>,
     ) {
-        previous.forEach { (key, planned) ->
-            if (current[key]?.afterData?.asString == planned.afterData.asString) return@forEach
-            if (!player.world.isChunkLoaded(key.x shr 4, key.z shr 4)) return@forEach
-            val block = player.world.getBlockAt(key.x, key.y, key.z)
-            player.sendBlockChange(block.location, block.blockData)
-        }
-        current.forEach { (key, planned) ->
-            if (previous[key]?.afterData?.asString == planned.afterData.asString) return@forEach
-            val block = player.world.getBlockAt(key.x, key.y, key.z)
-            val previewData =
-                if (planned.role == PlanRole.CLEARANCE && surfacePolicy.canClearAbove(block)) {
-                    planned.afterData
-                } else {
-                    previewSelector.select(planned.afterData, block.location).blockData
-                }
-            player.sendBlockChange(block.location, previewData)
-        }
+        val policy = surfacePolicy
+        val cells = current.values.asSequence().map { planned ->
+            RoadPreviewCell(planned.key.x, planned.key.y, planned.key.z, planned.afterData.asString,
+                planned.role == PlanRole.CLEARANCE)
+        }.iterator()
+        previews.replace(player.uniqueId, session.worldId, cells,
+            { x, y, z -> current[BlockKey(x, y, z)]?.afterData?.asString },
+            { !closed && sessions[player.uniqueId] === session && session.planned === current }, policy::canClearAbove)
     }
 
     private fun validCurrent(
@@ -832,16 +935,9 @@ class RoadManager internal constructor(
 
     private fun cancelPreview(
         player: Player,
-        session: Session,
+        @Suppress("UNUSED_PARAMETER") session: Session,
     ) {
-        val world = plugin.server.getWorld(session.worldId) ?: return
-        if (player.world.uid != world.uid) return
-        session.planned.values.forEach { planned ->
-            if (world.isChunkLoaded(planned.key.x shr 4, planned.key.z shr 4)) {
-                val block = world.getBlockAt(planned.key.x, planned.key.y, planned.key.z)
-                player.sendBlockChange(block.location, block.blockData)
-            }
-        }
+        previews.cancel(player.uniqueId)
     }
 
     private fun withinSegmentLimits(
@@ -955,10 +1051,11 @@ class RoadManager internal constructor(
         val startedAt: Long,
         val routeSections: MutableList<RouteSection>,
         val paletteSeed: Long = worldId.mostSignificantBits xor worldId.leastSignificantBits xor startedAt,
-        val planned: LinkedHashMap<BlockKey, PlannedBlock> = linkedMapOf(),
+        var planned: LinkedHashMap<BlockKey, PlannedBlock> = linkedMapOf(),
         var capped: Boolean = false,
         var capturedRows: Int = 0,
         var dirty: Boolean = false,
+        var committing: Boolean = false,
     )
 
     private companion object {

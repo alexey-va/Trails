@@ -38,6 +38,7 @@ import org.bukkit.permissions.PermissionDefault
 import org.bukkit.persistence.PersistentDataType
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.runtime.PaperNativeCleanupServiceProvider
 import ru.ruscrafting.trails.bukkit.RoadNotice
 import ru.ruscrafting.trails.bukkit.TrailToolKind
 import ru.ruscrafting.trails.domain.TrailIdentity
@@ -50,14 +51,21 @@ class TrailsPluginIntegrationTest :
         lateinit var server: ServerMock
         lateinit var plugin: TrailsPlugin
         lateinit var runtime: MockBukkitTestRuntime
+        lateinit var nativeCleanup: PaperNativeCleanupServiceProvider
 
         beforeTest {
             runtime = MockBukkitTestRuntime.open()
             server = runtime.server
+            val cleanupHost = runtime.createSimplePlugin("ArcCore")
+            nativeCleanup = PaperNativeCleanupServiceProvider(cleanupHost)
             plugin = runtime.loadPlugin(TrailsPlugin::class.java)
+            awaitTrailsReady(plugin, runtime)
         }
 
         afterTest {
+            server.pluginManager.disablePlugin(plugin)
+            plugin.drained().awaitTrails(server)
+            nativeCleanup.close()
             runtime.close()
         }
 
@@ -167,27 +175,31 @@ class TrailsPluginIntegrationTest :
                 Files.readString(configPath).replace("  localized-alias: ''", "  localized-alias: footpaths"),
             )
 
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
             server.dispatchCommand(player, "footpaths off") shouldBe true
             plugin.trailsEnabled(player.uniqueId) shouldBe false
         }
 
         "reload is transactional and does not accumulate repeating tasks" {
+            plugin.nativeWork().call({ true }) {}.awaitTrails(server)
             val initialTasks = server.scheduler.pendingTasks.count { it.owner == plugin }
-            plugin.reloadTrails().isSuccess shouldBe true
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
+            plugin.nativeWork().call({ true }) {}.awaitTrails(server)
             server.scheduler.pendingTasks.count { it.owner == plugin } shouldBe initialTasks
 
             val configPath = plugin.dataFolder.toPath().resolve("config.yml")
             val invalid = Files.readString(configPath).replace("  update-interval-ticks: 1", "  update-interval-ticks: 0")
             Files.writeString(configPath, invalid)
 
-            plugin.reloadTrails().isFailure shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isFailure shouldBe true
             plugin.settings.speedBoostInterval shouldBe 1L
+            plugin.nativeWork().call({ true }) {}.awaitTrails(server)
             server.scheduler.pendingTasks.count { it.owner == plugin } shouldBe initialTasks
         }
 
         "reload keeps the active task set when a replacement interval overflows" {
+            plugin.nativeWork().call({ true }) {}.awaitTrails(server)
             val initialTasks = server.scheduler.pendingTasks.count { it.owner == plugin }
             val configPath = plugin.dataFolder.toPath().resolve("config.yml")
             Files.writeString(
@@ -198,16 +210,17 @@ class TrailsPluginIntegrationTest :
                 ),
             )
 
-            plugin.reloadTrails().isFailure shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isFailure shouldBe true
 
             plugin.settings.saveIntervalMinutes shouldBe 5L
+            plugin.nativeWork().call({ true }) {}.awaitTrails(server)
             server.scheduler.pendingTasks.count { it.owner == plugin } shouldBe initialTasks
         }
 
         "five successful walks advance the default DirtPath and preserve block state" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("Walker")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             plugin.debugInspect(block) shouldContain "trail=DirtPath"
 
             repeat(5) { plugin.handleMovement(player, block) }
@@ -235,6 +248,39 @@ class TrailsPluginIntegrationTest :
             ) shouldBe true
         }
 
+        "five movements queued before cold metadata readiness retain every walk" {
+            val world = server.addSimpleWorld("cold_walks")
+            val player = server.addPlayer("ColdWalker")
+            val block = world.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK; it.biome = Biome.THE_VOID }
+            world.loadChunk(0, 0)
+            player.teleport(Location(world, 0.5, 65.0, 0.5))
+
+            repeat(5) { plugin.handleMovement(player, block) }
+            plugin.awaitTrailData(block.chunk).awaitTrails(server)
+
+            block.type shouldBe Material.DIRT
+            plugin.inspectTrail(block) shouldBe TrailBlockState(TrailIdentity("DirtPath", 1), 0)
+        }
+
+        "cold trusted force preserves its request world and discards work after that player changes worlds" {
+            val targetWorld = server.addSimpleWorld("force_targets")
+            val player = server.addPlayer("RemoteTrustedForce")
+            val target = targetWorld.getBlockAt(0, 64, 0).also { it.type = Material.GRASS_BLOCK; it.biome = Biome.THE_VOID }
+            targetWorld.loadChunk(0, 0)
+            plugin.forceTrail(player, target)
+            plugin.awaitTrailData(target.chunk).awaitTrails(server)
+            target.type shouldBe Material.DIRT
+
+            val stale = targetWorld.getBlockAt(16, 64, 0).also { it.type = Material.GRASS_BLOCK; it.biome = Biome.THE_VOID }
+            targetWorld.loadChunk(1, 0)
+            plugin.forceTrail(player, stale)
+            val destination = server.addSimpleWorld("force_destination")
+            player.teleport(Location(destination, 0.5, 65.0, 0.5))
+            plugin.awaitTrailData(stale.chunk).awaitTrails(server)
+            stale.type shouldBe Material.GRASS_BLOCK
+            plugin.inspectTrail(stale) shouldBe null
+        }
+
         "a plains surface selects the biome-specific MeadowPath" {
             val world = server.addSimpleWorld("meadow_world")
             val player = server.addPlayer("MeadowWalker")
@@ -242,6 +288,7 @@ class TrailsPluginIntegrationTest :
                 it.type = Material.GRASS_BLOCK
                 it.biome = Biome.PLAINS
             }
+            block.warmFixture(plugin)
             plugin.debugInspect(block) shouldContain "trail=MeadowPath"
 
             repeat(6) { plugin.handleMovement(player, block) }
@@ -267,6 +314,7 @@ class TrailsPluginIntegrationTest :
                     it.type = material
                     it.biome = biome
                 }
+                block.warmFixture(plugin)
                 plugin.debugInspect(block) shouldContain "trail=$expected"
             }
         }
@@ -276,7 +324,7 @@ class TrailsPluginIntegrationTest :
             val player = server.addPlayer("EventWalker")
             val from = Location(world, 0.5, 65.0, 0.5)
             val to = Location(world, 1.5, 65.0, 0.5)
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             player.teleport(from)
 
             repeat(5) {
@@ -292,7 +340,7 @@ class TrailsPluginIntegrationTest :
             val player = server.addPlayer("CancelledWalker")
             val from = Location(world, 0.5, 65.0, 0.5)
             val to = Location(world, 1.5, 65.0, 0.5)
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             player.teleport(from)
 
             repeat(5) {
@@ -307,7 +355,7 @@ class TrailsPluginIntegrationTest :
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("BoostedWalker")
             val location = Location(world, 0.5, 65.0, 0.5)
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             player.teleport(location)
             player.walkSpeed = 0.2F
             plugin.forceTrail(player, block)
@@ -334,7 +382,7 @@ class TrailsPluginIntegrationTest :
             val destination = server.addSimpleWorld("portal_destination")
             val player = server.addPlayer("PortalBuilder").also { it.isOp = true }
             val location = Location(world, 0.5, 65.0, 0.5)
-            for (x in 0..4) world.getBlockAt(x, 64, 0).fallbackGrass()
+            for (x in 0..4) world.getBlockAt(x, 64, 0).fallbackGrass(plugin)
             world.loadChunk(0, 0)
             player.teleport(location)
             Files.writeString(
@@ -343,7 +391,7 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [portal_world]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             fun startManagedState() {
                 plugin.roadStart(player, "footpath").message shouldBe "messages.roadStarted"
@@ -373,9 +421,9 @@ class TrailsPluginIntegrationTest :
             val world = server.addSimpleWorld("activity_world")
             val otherWorld = server.addSimpleWorld("other_activity_world")
             val player = server.addPlayer("ActivityWalker")
-            val unloaded = world.getBlockAt(0, 64, 0).fallbackGrass()
-            val neighbour = world.getBlockAt(16, 64, 0).fallbackGrass()
-            val otherWorldBlock = otherWorld.getBlockAt(0, 64, 0).fallbackGrass()
+            val unloaded = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
+            val neighbour = world.getBlockAt(16, 64, 0).fallbackGrass(plugin)
+            val otherWorldBlock = otherWorld.getBlockAt(0, 64, 0).fallbackGrass(plugin)
 
             plugin.forceTrail(player, unloaded)
             plugin.forceTrail(player, neighbour)
@@ -394,7 +442,7 @@ class TrailsPluginIntegrationTest :
         "bukkit-event protection fires only for the material transition and respects cancellation" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("ProtectedWalker")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             var changeCalls = 0
             var placeCalls = 0
             val listener = object : Listener {}
@@ -443,7 +491,7 @@ class TrailsPluginIntegrationTest :
         "bukkit-event protection treats canBuild false as a veto" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("BuildDeniedWalker")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             val listener = object : Listener {}
             server.pluginManager.registerEvent(
                 BlockPlaceEvent::class.java,
@@ -463,7 +511,7 @@ class TrailsPluginIntegrationTest :
         "creation respects the personal toggle, sneak bypass, and enabled worlds" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("CarefulWalker")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
 
             plugin.setTrailsEnabled(player.uniqueId, false)
             repeat(5) { plugin.handleMovement(player, block) }
@@ -482,7 +530,7 @@ class TrailsPluginIntegrationTest :
                     .replace("  mode: all", "  mode: allowlist")
                     .replace("  names: []", "  names: [survival]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
             repeat(5) { plugin.handleMovement(player, block) }
             plugin.inspectTrail(block) shouldBe null
         }
@@ -490,7 +538,7 @@ class TrailsPluginIntegrationTest :
         "permission-gated creation requires trails.create-trails" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("PermittedWalker")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             val configPath = plugin.dataFolder.toPath().resolve("config.yml")
             Files.writeString(
                 configPath,
@@ -499,7 +547,7 @@ class TrailsPluginIntegrationTest :
                     "  require-permission: true",
                 ),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             repeat(5) { plugin.handleMovement(player, block) }
             plugin.inspectTrail(block) shouldBe null
@@ -512,7 +560,7 @@ class TrailsPluginIntegrationTest :
         "permission-gated boost requires trails.boost" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("BoostPermissionWalker")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             val configPath = plugin.dataFolder.toPath().resolve("config.yml")
             Files.writeString(
                 configPath,
@@ -521,7 +569,7 @@ class TrailsPluginIntegrationTest :
                     "speed-boost:\n  require-permission: true",
                 ),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
             player.walkSpeed = 0.2F
             plugin.forceTrail(player, block)
 
@@ -538,13 +586,14 @@ class TrailsPluginIntegrationTest :
         "the trail tool advances immediately and block breaking clears persisted state" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("Builder")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
 
             plugin.forceTrail(player, block)
             block.type shouldBe Material.DIRT
             plugin.inspectTrail(block)?.identity?.serialize() shouldBe "DirtPath:1"
 
             server.pluginManager.callEvent(BlockBreakEvent(block, player))
+            plugin.awaitTrailData(block.chunk).awaitTrails(server)
             plugin.inspectTrail(block) shouldBe null
         }
 
@@ -553,7 +602,7 @@ class TrailsPluginIntegrationTest :
             val player = server.addPlayer("PistonWalker")
             val piston = world.getBlockAt(0, 64, 0).also { it.type = Material.STICKY_PISTON }
             val destination = world.getBlockAt(1, 64, 0)
-            val source = world.getBlockAt(2, 64, 0).fallbackGrass()
+            val source = world.getBlockAt(2, 64, 0).fallbackGrass(plugin)
             plugin.forceTrail(player, source)
             val state = plugin.inspectTrail(source)
 
@@ -568,7 +617,7 @@ class TrailsPluginIntegrationTest :
         "natural material decay fires BlockFadeEvent and respects cancellation" {
             val world = server.addSimpleWorld("world")
             val player = server.addPlayer("DecayGuard")
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
             plugin.forceTrail(player, block)
             block.type shouldBe Material.DIRT
             val listener = object : Listener {}
@@ -590,7 +639,7 @@ class TrailsPluginIntegrationTest :
             val world = server.addSimpleWorld("world")
             val admin = server.addPlayer("ToolAdmin")
             admin.isOp = true
-            val block = world.getBlockAt(0, 64, 0).fallbackGrass()
+            val block = world.getBlockAt(0, 64, 0).fallbackGrass(plugin)
 
             val ordinaryInteraction =
                 PlayerInteractEvent(
@@ -658,7 +707,7 @@ class TrailsPluginIntegrationTest :
             val world = server.addSimpleWorld("debug_world")
             val regular = server.addPlayer("DebugRegular")
             val admin = server.addPlayer("DebugAdmin").also { it.isOp = true }
-            val block = world.getBlockAt(4, 64, -3).fallbackGrass()
+            val block = world.getBlockAt(4, 64, -3).fallbackGrass(plugin)
             admin.teleport(Location(world, 4.5, 65.0, -2.5))
 
             server.dispatchCommand(regular, "trails debug inspect") shouldBe true
@@ -669,18 +718,18 @@ class TrailsPluginIntegrationTest :
                 "permission"
 
             server.dispatchCommand(admin, "trails debug inspect") shouldBe true
-            val playerInspect = PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage()))
+            val playerInspect = PlainTextComponentSerializer.plainText().serialize(awaitTrailsMessage(server, admin::nextComponentMessage))
             playerInspect shouldContain "TRAILS_DEBUG action=inspect"
             playerInspect shouldContain "world=debug_world"
             playerInspect shouldContain "x=4 y=64 z=-3"
 
             server.dispatchCommand(server.consoleSender, "trails debug pulse 5 DebugAdmin") shouldBe true
-            val pulse = PlainTextComponentSerializer.plainText().serialize(checkNotNull(server.consoleSender.nextComponentMessage()))
+            val pulse = PlainTextComponentSerializer.plainText().serialize(awaitTrailsMessage(server, server.consoleSender::nextComponentMessage))
             pulse shouldContain "TRAILS_DEBUG action=pulse pulses=5"
             block.type shouldBe Material.DIRT
 
             server.dispatchCommand(server.consoleSender, "trails debug inspect debug_world 4 64 -3") shouldBe true
-            val consoleInspect = PlainTextComponentSerializer.plainText().serialize(checkNotNull(server.consoleSender.nextComponentMessage()))
+            val consoleInspect = PlainTextComponentSerializer.plainText().serialize(awaitTrailsMessage(server, server.consoleSender::nextComponentMessage))
             consoleInspect shouldContain "trail=DirtPath"
             consoleInspect shouldContain "stage=1"
 
@@ -725,7 +774,7 @@ class TrailsPluginIntegrationTest :
             )
             val configPath = plugin.dataFolder.toPath().resolve("config.yml")
             Files.writeString(configPath, Files.readString(configPath).replace("locale: en-US", "locale: ru-RU"))
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             server.dispatchCommand(admin, "trails build start rustic") shouldBe true
             val startMessage = PlainTextComponentSerializer.plainText().serialize(checkNotNull(admin.nextComponentMessage()))
@@ -737,20 +786,24 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(4, 64, 0).type shouldBe Material.GRASS_BLOCK
 
             server.dispatchCommand(admin, "trails build commit") shouldBe true
+            admin.awaitTrailsMessage(server, "Применено блоков дороги:")
             setOf(Material.DIRT_PATH, Material.COARSE_DIRT) shouldContain world.getBlockAt(4, 64, 0).type
             plugin.inspectTrail(world.getBlockAt(4, 64, 0))?.walks shouldBe 0
 
             server.dispatchCommand(admin, "trails build undo") shouldBe true
+            admin.awaitTrailsMessage(server, "Восстановлено блоков последней дороги:")
             world.getBlockAt(4, 64, 0).type shouldBe Material.GRASS_BLOCK
             plugin.inspectTrail(world.getBlockAt(4, 64, 0)) shouldBe null
 
             server.dispatchCommand(admin, "trails build start rustic") shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5)) shouldBe true
             server.dispatchCommand(admin, "trails build commit") shouldBe true
+            admin.awaitTrailsMessage(server, "Применено блоков дороги:")
             val committedSideMaterial = world.getBlockAt(1, 64, 1).type
             world.getBlockAt(1, 64, 0).type = Material.STONE
 
             server.dispatchCommand(admin, "trails build undo") shouldBe true
+            admin.awaitTrailsMessage(server, "Откат остановлен: хотя бы один блок дороги изменили после применения.")
 
             world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
             world.getBlockAt(1, 64, 1).type shouldBe committedSideMaterial
@@ -770,7 +823,7 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(builder, "footpath")
             plugin.captureRoadMovement(builder, Location(world, 2.5, 65.0, 0.5))
@@ -778,9 +831,9 @@ class TrailsPluginIntegrationTest :
             world.getBlockAt(1, 64, 0).type = Material.DIRT
             plugin.captureRoadMovement(builder, Location(world, 3.5, 65.0, 0.5))
 
-            plugin.roadCommit(builder).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(builder).awaitTrails(server).message shouldBe "messages.roadCommitted"
             world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT_PATH
-            plugin.roadUndo(builder).message shouldBe "messages.roadUndone"
+            plugin.roadUndo(builder).awaitTrails(server).message shouldBe "messages.roadUndone"
             world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT
         }
 
@@ -799,14 +852,14 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(builder, "footpath")
             plugin.captureRoadMovement(builder, Location(world, 18.5, 65.0, 0.5))
             plugin.roadStatus(builder)
             world.unloadChunk(1, 0) shouldBe true
 
-            plugin.roadCommit(builder).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(builder).awaitTrails(server).message shouldBe "messages.roadCommitted"
             world.getBlockAt(17, 64, 0).type shouldBe Material.DIRT_PATH
         }
 
@@ -826,11 +879,12 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             server.dispatchCommand(admin, "trails build start cobblestone") shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5)) shouldBe true
             server.dispatchCommand(admin, "trails build commit") shouldBe true
+            admin.awaitTrailsMessage(server, "Committed ")
 
             setOf(Material.STONE_BRICKS, Material.CRACKED_STONE_BRICKS) shouldContain world.getBlockAt(2, 64, 0).type
             setOf(Material.COBBLESTONE, Material.MOSSY_COBBLESTONE) shouldContain world.getBlockAt(2, 64, 1).type
@@ -855,11 +909,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "footpath").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 5.5, 65.0, 0.5)) shouldBe true
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(0, 64, 0).type shouldBe Material.DIRT_PATH
             world.getBlockAt(1, 64, 0).type shouldBe Material.BEDROCK
@@ -889,11 +943,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "boardwalk").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 3.5, 66.0, 0.5)) shouldBe true
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             val ascending = world.getBlockAt(1, 65, 0).blockData as Stairs
             setOf(Material.OAK_STAIRS, Material.SPRUCE_STAIRS) shouldContain ascending.material
@@ -907,7 +961,7 @@ class TrailsPluginIntegrationTest :
             admin.teleport(Location(world, 3.5, 66.0, 0.5))
             plugin.roadStart(admin, "boardwalk").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 0.5, 65.0, 0.5)) shouldBe true
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             val descending = world.getBlockAt(1, 65, 0).blockData as Stairs
             descending.facing shouldBe BlockFace.EAST
@@ -929,11 +983,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "footpath").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 1.5, 66.0, 0.5)) shouldBe true
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             val slab = world.getBlockAt(1, 65, 0).blockData as Slab
             setOf(Material.OAK_SLAB, Material.SPRUCE_SLAB) shouldContain slab.material
@@ -957,14 +1011,14 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 1.5))
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
             plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 1.5))
             plugin.captureRoadMovement(admin, Location(world, 4.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             setOf(Material.DIRT_PATH, Material.COARSE_DIRT, Material.ROOTED_DIRT, Material.PODZOL) shouldContain
                 world.getBlockAt(1, 64, 1).type
@@ -989,12 +1043,12 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("    tolerance-blocks: 1.0", "    tolerance-blocks: 0.0"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 2.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(3, 64, 0).type shouldBe Material.STONE
             setOf(Material.DIRT_PATH, Material.COARSE_DIRT, Material.ROOTED_DIRT, Material.PODZOL) shouldContain
@@ -1019,11 +1073,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             (world.getBlockAt(1, 65, 1).blockData is Stairs) shouldBe false
         }
@@ -1046,11 +1100,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(1, 67, 1).type shouldBe Material.STONE
         }
@@ -1074,11 +1128,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "lantern_lane").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 24.5, 65.0, 0.5)) shouldBe true
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             setOf(Material.COBBLESTONE_WALL, Material.MOSSY_COBBLESTONE_WALL) shouldContain world.getBlockAt(12, 65, 2).type
             world.getBlockAt(12, 66, 2).type shouldBe Material.OAK_FENCE
@@ -1105,11 +1159,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "lantern_lane")
             plugin.captureRoadMovement(admin, Location(world, 0.5, 65.0, 12.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             setOf(Material.COBBLESTONE_WALL, Material.MOSSY_COBBLESTONE_WALL) shouldContain world.getBlockAt(-2, 65, 12).type
             world.getBlockAt(-2, 66, 12).type shouldBe Material.OAK_FENCE
@@ -1133,11 +1187,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "lantern_lane")
             plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(12, 65, 2).type shouldBe Material.CHEST
             world.getBlockAt(12, 66, 2).type shouldBe Material.AIR
@@ -1160,11 +1214,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "lantern_lane")
             plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(12, 64, 2).type shouldBe Material.AIR
             world.getBlockAt(12, 65, 2).type shouldBe Material.AIR
@@ -1189,12 +1243,12 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "lantern_lane")
             plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 0.5))
             plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 2.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(12, 65, 2).type shouldBe Material.AIR
             world.getBlockAt(12, 66, 2).type shouldBe Material.AIR
@@ -1219,12 +1273,12 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("  max-planned-blocks: 2048", "  max-planned-blocks: 41"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "lantern_lane")
             plugin.captureRoadMovement(admin, Location(world, 12.5, 65.0, 0.5))
             plugin.roadStatus(admin).replacements["%count%"] shouldBe "39"
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommittedCapped"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommittedCapped"
 
             world.getBlockAt(12, 65, 2).type shouldBe Material.AIR
             world.getBlockAt(12, 66, 2).type shouldBe Material.AIR
@@ -1247,16 +1301,16 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("  return-to-survival-inventory: false", "  return-to-survival-inventory: true"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "footpath")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
-            val result = plugin.roadCommit(admin)
+            val result = plugin.roadCommit(admin).awaitTrails(server)
 
             result.message shouldBe "messages.roadCommitted"
             result.notices.map(RoadNotice::message) shouldContain "messages.roadBlocksReturned"
             admin.inventory.contents.filterNotNull().filter { it.type == Material.STONE }.sumOf(ItemStack::getAmount) shouldBe 3
-            plugin.roadUndo(admin).message shouldBe "messages.roadNothingToUndo"
+            plugin.roadUndo(admin).awaitTrails(server).message shouldBe "messages.roadNothingToUndo"
         }
 
         "survival road commits require the exact collection permission before returning blocks" {
@@ -1274,14 +1328,14 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("  return-to-survival-inventory: false", "  return-to-survival-inventory: true"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(builder, "footpath")
             plugin.captureRoadMovement(builder, Location(world, 1.5, 65.0, 0.5))
-            plugin.roadCommit(builder).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(builder).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             builder.inventory.contents.filterNotNull().filter { it.type == Material.STONE }.sumOf(ItemStack::getAmount) shouldBe 0
-            plugin.roadUndo(builder).message shouldBe "messages.roadUndone"
+            plugin.roadUndo(builder).awaitTrails(server).message shouldBe "messages.roadUndone"
         }
 
         "creative road commits keep undo and do not return removed blocks" {
@@ -1300,14 +1354,14 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("  return-to-survival-inventory: false", "  return-to-survival-inventory: true"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "footpath")
             plugin.captureRoadMovement(admin, Location(world, 1.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             admin.inventory.contents.filterNotNull().filter { it.type == Material.STONE }.sumOf(ItemStack::getAmount) shouldBe 0
-            plugin.roadUndo(admin).message shouldBe "messages.roadUndone"
+            plugin.roadUndo(admin).awaitTrails(server).message shouldBe "messages.roadUndone"
         }
 
         "roads can start on and repaint configured road materials" {
@@ -1326,11 +1380,11 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "boardwalk").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5)) shouldBe true
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             setOf(Material.OAK_PLANKS, Material.SPRUCE_PLANKS) shouldContain world.getBlockAt(2, 64, 0).type
         }
@@ -1351,12 +1405,13 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("  max-segment-distance-blocks: 48", "  max-segment-distance-blocks: 16"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             server.dispatchCommand(admin, "trails build start footpath") shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 20.5, 65.0, 0.5)) shouldBe true
             plugin.captureRoadMovement(admin, Location(world, 21.5, 65.0, 0.5)) shouldBe true
             server.dispatchCommand(admin, "trails build commit") shouldBe true
+            admin.awaitTrailsMessage(server, "Committed ")
 
             world.getBlockAt(10, 64, 0).type shouldBe Material.GRASS_BLOCK
             world.getBlockAt(20, 64, 0).type shouldBe Material.DIRT_PATH
@@ -1379,12 +1434,12 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("  max-segment-distance-blocks: 48", "  max-segment-distance-blocks: 16"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
 
             plugin.roadStart(admin, "footpath").message shouldBe "messages.roadStarted"
             plugin.captureRoadMovement(admin, Location(world, 20.5, 65.0, 0.5)) shouldBe true
 
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
             world.getBlockAt(10, 64, 0).type shouldBe Material.GRASS_BLOCK
             world.getBlockAt(20, 64, 0).type shouldBe Material.DIRT_PATH
         }
@@ -1403,7 +1458,7 @@ class TrailsPluginIntegrationTest :
                     .replace("enabled: false", "enabled: true")
                     .replace("worlds: []", "worlds: [arc_qa_flat]"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
             plugin.roadStart(admin, "footpath").message shouldBe "messages.roadStarted"
             admin.allowFlight = true
             admin.isFlying = true
@@ -1416,7 +1471,7 @@ class TrailsPluginIntegrationTest :
                 ),
             )
 
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
             world.getBlockAt(2, 64, 0).type shouldBe Material.DIRT_PATH
         }
 
@@ -1437,7 +1492,7 @@ class TrailsPluginIntegrationTest :
                     .replace("worlds: []", "worlds: [arc_qa_flat]")
                     .replace("  return-to-survival-inventory: false", "  return-to-survival-inventory: true"),
             )
-            plugin.reloadTrails().isSuccess shouldBe true
+            plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).isSuccess shouldBe true
             val listener = object : Listener {}
             server.pluginManager.registerEvent(
                 BlockPlaceEvent::class.java,
@@ -1461,8 +1516,25 @@ class TrailsPluginIntegrationTest :
         }
     })
 
-private fun Block.fallbackGrass(): Block =
+private fun Block.fallbackGrass(plugin: TrailsPlugin): Block =
     apply {
         type = Material.GRASS_BLOCK
         biome = Biome.THE_VOID
+        warmFixture(plugin)
     }
+
+private fun Block.warmFixture(plugin: TrailsPlugin): Block = apply {
+    if (!world.isChunkLoaded(x shr 4, z shr 4)) world.loadChunk(x shr 4, z shr 4)
+    if (!plugin.trailDataReady(this)) plugin.awaitTrailData(chunk).awaitTrails(plugin.server as ServerMock)
+}
+
+private fun awaitTrailsMessage(server: ServerMock, next: () -> net.kyori.adventure.text.Component?): net.kyori.adventure.text.Component {
+    val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+    var message = next()
+    while (message == null && System.nanoTime() < deadline) {
+        server.scheduler.performTicks(1)
+        Thread.sleep(1)
+        message = next()
+    }
+    return requireNotNull(message) { "Deferred Trails command produced no result" }
+}

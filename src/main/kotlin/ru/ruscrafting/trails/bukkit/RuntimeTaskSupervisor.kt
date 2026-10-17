@@ -10,12 +10,16 @@ import ru.ruscrafting.trails.service.SpeedController
 import ru.ruscrafting.trails.service.TrailService
 import ru.ruscrafting.trails.service.WalkSpeedTarget
 import ru.ruscrafting.trails.storage.PlayerPreferencesStore
+import ru.arc.core.BudgetedTaskQueue
+import ru.arc.core.BoundedAsyncExecutor
 import java.util.UUID
 
 /** Owns every reloadable scheduler and walk-speed state used by Trails. */
 internal class RuntimeTaskSupervisor(
     private val plugin: Plugin,
     private val preferences: PlayerPreferencesStore,
+    private val nativeWork: BudgetedTaskQueue,
+    private val storage: BoundedAsyncExecutor,
     private val speedController: SpeedController = SpeedController(),
     private val speedTarget: (Player) -> WalkSpeedTarget = ::BukkitWalkSpeedTarget,
 ) : AutoCloseable {
@@ -75,7 +79,7 @@ internal class RuntimeTaskSupervisor(
                     saveIntervalTicks,
                 )
             if (settings.trailDecay) {
-                decayScheduler = DecayScheduler(plugin, settings, trailService, canDecay)
+                decayScheduler = DecayScheduler(plugin, settings, trailService, nativeWork, storage, canDecay)
             }
             return RuntimeTasks(speedTask, preferenceSaveTask, decayScheduler)
         } catch (error: Exception) {

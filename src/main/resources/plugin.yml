@@ -5,6 +5,8 @@ description: Naturally creates configurable paths where players walk.
 api-version: "1.21.11"
 authors: [j10max, ccrama, drkmatr1984, Mr-Deej, GrocerMC, alexey-va]
 website: https://github.com/alexey-va/Trails
+depend:
+  - ArcCore
 softdepend:
   - ARC
   - CoreProtect

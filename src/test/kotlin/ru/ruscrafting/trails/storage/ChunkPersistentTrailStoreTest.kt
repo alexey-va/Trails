@@ -1,259 +1,415 @@
 package ru.ruscrafting.trails.storage
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.mockk.every
+import io.mockk.mockk
+import org.bukkit.Bukkit
+import org.bukkit.Chunk
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
+import org.bukkit.World
+import org.bukkit.block.Block
 import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.persistence.PersistentDataType
+import ru.arc.core.BoundedAsyncExecutor
+import ru.arc.core.BudgetedTaskQueue
+import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.TestTaskScheduler
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.trails.domain.TrailIdentity
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
-class ChunkPersistentTrailStoreTest :
-    FreeSpec({
-        lateinit var runtime: MockBukkitTestRuntime
+class ChunkPersistentTrailStoreTest : FreeSpec({
+    "cold capture returns while decode is blocked and does not reserve a polling queue slot" {
+        withStore { f ->
+            val block = f.block()
+            val states = (0 until 10_000).associate { it to TrailBlockState(null, it) }
+            block.chunk.persistentDataContainer.set(f.store.storageKey, PersistentDataType.BYTE_ARRAY, TrailChunkCodec.encode(states))
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            try {
+                val ready = f.store.prepare(block.chunk)
+                repeat(20) { f.tick() }
+                ready.isDone shouldBe false
+                f.reads shouldBe 1
+                var unrelated = false
+                val other = f.queue.call({ true }) { unrelated = true }
+                f.await { other.isDone }
+                unrelated shouldBe true
+                f.reads shouldBe 1
+                release.countDown()
+                f.finish(ready)
+                f.store.read(f.world.getBlockAt(0, 1, 0))?.walks shouldBe 256
+            } finally { release.countDown() }
+        }
+    }
 
-        beforeTest { runtime = MockBukkitTestRuntime.open() }
-        afterTest { runtime.close() }
-
-        "coalesces block mutations into one chunk PDC write and reloads them" {
-            val plugin = runtime.createSimplePlugin("TrailStoreTest")
-            val world = runtime.addSimpleWorld("world")
-            val first = world.getBlockAt(1, 64, 2).also { it.type = Material.GRASS_BLOCK }
-            val second = world.getBlockAt(15, 70, 15).also { it.type = Material.STONE }
-            val store = testStore(plugin)
+    "coalesces mutations into one native PDC write and later load acknowledges exact durable bytes" {
+        withStore { f ->
+            val first = f.block(1, 64, 2)
+            val second = f.block(15, 70, 15)
+            f.warm(first)
             val firstState = TrailBlockState(TrailIdentity("DirtPath", 0), 4)
             val secondState = TrailBlockState(null, 0)
+            f.store.write(first, firstState)
+            f.store.write(second, secondState)
+            first.chunk.persistentDataContainer.has(f.store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
+            f.store.flushDirty() shouldBe 1
+            f.await { f.writes == 1 }
+            f.store.read(first) shouldBe firstState
+            f.store.read(second) shouldBe secondState
+            f.store.trackedBlocks(first.chunk) shouldContainExactlyInAnyOrder listOf(first, second)
+            f.closeStore()
 
-            store.write(first, firstState)
-            store.write(second, secondState)
-
-            store.read(first) shouldBe firstState
-            store.read(second) shouldBe secondState
-            first.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
-            store.flushDirty() shouldBe 1
-            first.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe true
-
-            val reopened = testStore(plugin)
-            reopened.read(first) shouldBe firstState
-            reopened.read(second) shouldBe secondState
-            reopened.trackedBlocks(first.chunk) shouldContainExactlyInAnyOrder listOf(first, second)
-
-            reopened.close()
-            store.close()
+            f.reopen()
+            f.store.onChunkLoad(ChunkLoadEvent(first.chunk, false))
+            f.warm(first)
+            f.store.read(first) shouldBe firstState
+            f.store.read(second) shouldBe secondState
+            f.journal.size() shouldBe 0
         }
+    }
 
-        "world save processes only eight dirty chunks and later ticks drain the remainder" {
-            val plugin = runtime.createSimplePlugin("TrailBatchTest")
-            val world = runtime.addSimpleWorld("world")
-            val blocks = (0 until 24).map { world.getBlockAt(it * 16, 64, 0) }
-            val store = testStore(plugin)
-            blocks.forEach { store.write(it, TrailBlockState(null, 1)) }
-
-            store.onWorldSave(org.bukkit.event.world.WorldSaveEvent(world))
-            blocks.count { it.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) } shouldBe 8
-            store.flushDirty() shouldBe 8
-            store.flushDirty() shouldBe 8
-            store.flushDirty() shouldBe 0
-            blocks.count { it.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) } shouldBe 24
-            store.close()
+    "world save starts at most eight encodes and later flushes drain remaining chunks" {
+        withStore { f ->
+            val blocks = (0 until 24).map { f.block(it * 16, 64, 0) }
+            blocks.forEach { f.warm(it); f.store.write(it, TrailBlockState(null, 1)) }
+            f.store.onWorldSave(org.bukkit.event.world.WorldSaveEvent(f.world))
+            f.await { f.writes == 8 }
+            f.store.flushDirty() shouldBe 8
+            f.await { f.writes == 16 }
+            f.store.flushDirty() shouldBe 8
+            f.await { f.writes == 24 }
+            f.store.flushDirty() shouldBe 0
         }
+    }
 
-        "chunk unload flushes and evicts cached state" {
-            val plugin = runtime.createSimplePlugin("TrailUnloadTest")
-            val world = runtime.addSimpleWorld("world")
-            val block = world.getBlockAt(3, 80, 5).also { it.type = Material.DIRT }
-            val store = testStore(plugin)
-            runtime.server.pluginManager.registerEvents(store, plugin)
-            store.write(block, TrailBlockState(TrailIdentity("DirtPath", 1), 2))
-
-            runtime.callEvent(ChunkUnloadEvent(block.chunk, true))
-
-            store.cachedChunkCount() shouldBe 0
-            block.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe true
-            store.close()
+    "unload performs no native PDC mutation and retains the detached state in durable recovery" {
+        withStore { f ->
+            val block = f.block(3, 80, 5)
+            f.warm(block)
+            val expected = TrailBlockState(TrailIdentity("DirtPath", 1), 2)
+            f.store.write(block, expected)
+            val event = ChunkUnloadEvent(block.chunk, false)
+            f.store.onChunkUnload(event)
+            event.isSaveChunk shouldBe true
+            f.store.cachedChunkCount() shouldBe 0
+            f.writes shouldBe 0
+            f.await { f.journal.load(f.world.uid, block.chunk.chunkKey) != null }
+            f.closeStore()
+            f.reopen()
+            f.store.onChunkLoad(ChunkLoadEvent(block.chunk, false))
+            f.warm(block)
+            f.store.read(block) shouldBe expected
         }
+    }
 
-        "failed chunk PDC writes recover from the durable journal after a real reload" {
-            val plugin = runtime.createSimplePlugin("TrailRecoveryTest")
-            val world = runtime.addSimpleWorld("world")
-            val block = world.getBlockAt(7, 81, 9).also { it.type = Material.DIRT }
+    "failed native PDC mutation leaves the acknowledged journal authoritative until a later capture" {
+        withStore { f ->
+            val block = f.block(7, 81, 9)
+            f.warm(block)
             val expected = TrailBlockState(TrailIdentity("DirtPath", 2), 6)
-            val failures = mutableListOf<Throwable>()
-            val failingPersistence =
-                object : TrailChunkPersistence by BukkitTrailChunkPersistence {
-                    override fun write(chunk: org.bukkit.Chunk, key: org.bukkit.NamespacedKey, encoded: ByteArray?) {
-                        throw IllegalStateException("simulated PDC failure")
-                    }
-                }
-            val store =
-                testStore(
-                    plugin = plugin,
-                    persistenceFailureSink = { _, error -> failures += error },
-                    persistence = failingPersistence,
-                )
-            store.write(block, expected)
-            val failedUnload = ChunkUnloadEvent(block.chunk, false)
-
-            store.onChunkUnload(failedUnload)
-
-            failedUnload.isSaveChunk shouldBe true
-            store.cachedChunkCount() shouldBe 0
-            store.healthContribution().state shouldBe RuntimeHealthState.DEGRADED
-            store.healthContribution().recoveryBacklog shouldBe 1
-            failures.size shouldBe 1
-            block.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
-            store.close()
-
-            val recovered = testStore(plugin)
-            recovered.onChunkLoad(ChunkLoadEvent(block.chunk, false))
-            recovered.read(block) shouldBe expected
-            recovered.flushDirty() shouldBe 1
-            recovered.healthContribution().recoveryBacklog shouldBe 1
-            recovered.onChunkUnload(ChunkUnloadEvent(block.chunk, true))
-            recovered.onChunkLoad(ChunkLoadEvent(block.chunk, false))
-
-            recovered.read(block) shouldBe expected
-            recovered.healthContribution().recoveryBacklog shouldBe 0
-            recovered.healthContribution().state shouldBe RuntimeHealthState.UP
-            recovered.close()
+            f.store.write(block, expected)
+            f.failWrites = true
+            f.store.flushDirty()
+            f.await { f.failures.isNotEmpty() }
+            f.store.healthContribution().state shouldBe RuntimeHealthState.DEGRADED
+            block.chunk.persistentDataContainer.has(f.store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
+            f.closeStore()
+            f.failWrites = false
+            f.reopen()
+            f.store.onChunkLoad(ChunkLoadEvent(block.chunk, false))
+            f.warm(block)
+            f.store.read(block) shouldBe expected
+            f.store.flushDirty()
+            f.await { block.chunk.persistentDataContainer.has(f.store.storageKey, PersistentDataType.BYTE_ARRAY) }
+            f.store.onChunkUnload(ChunkUnloadEvent(block.chunk, true))
+            f.store.onChunkLoad(ChunkLoadEvent(block.chunk, false))
+            f.warm(block)
+            f.journal.size() shouldBe 0
         }
+    }
 
-        "clearing the final entry removes the chunk PDC payload" {
-            val plugin = runtime.createSimplePlugin("TrailClearTest")
-            val world = runtime.addSimpleWorld("world")
-            val block = world.getBlockAt(4, 66, 7)
-            val store = testStore(plugin)
-            store.write(block, TrailBlockState(null, 0))
-            store.flushDirty()
-
-            store.clear(block)
-            store.flushDirty()
-
-            block.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
-            store.trackedBlocks(block.chunk) shouldBe emptyList()
-            store.close()
+    "clearing a final entry removes the PDC payload after worker durability" {
+        withStore { f ->
+            val block = f.block(4, 66, 7)
+            f.warm(block)
+            f.store.write(block, TrailBlockState(null, 0))
+            f.store.flushDirty()
+            f.await { f.writes == 1 }
+            f.store.clear(block)
+            f.store.flushDirty()
+            f.await { f.writes == 2 }
+            block.chunk.persistentDataContainer.has(f.store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
+            f.store.trackedBlocks(block.chunk) shouldBe emptyList()
         }
+    }
 
-        "corrupt chunk data is bounded, reported, and replaced with an empty payload" {
-            val plugin = runtime.createSimplePlugin("TrailCorruptionTest")
-            val world = runtime.addSimpleWorld("world")
-            val block = world.getBlockAt(4, 66, 7)
-            val corruptions = mutableListOf<Throwable>()
-            val store =
-                testStore(
-                    plugin = plugin,
-                    corruptionSink = { _, error -> corruptions += error },
-                )
-            block.chunk.persistentDataContainer.set(
-                store.storageKey,
-                PersistentDataType.BYTE_ARRAY,
-                byteArrayOf(1, 2, 3, 4, 5),
-            )
-
-            store.read(block) shouldBe null
-
-            corruptions.size shouldBe 1
-            store.healthContribution().state shouldBe RuntimeHealthState.DEGRADED
-            store.flushDirty() shouldBe 1
-            block.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
-            store.healthContribution().state shouldBe RuntimeHealthState.UP
-            store.close()
+    "corrupt native payload is reported on Main and is repaired by the durable worker pipeline" {
+        withStore { f ->
+            val block = f.block(4, 66, 7)
+            block.chunk.persistentDataContainer.set(f.store.storageKey, PersistentDataType.BYTE_ARRAY, byteArrayOf(1, 2, 3, 4, 5))
+            f.warm(block)
+            f.store.read(block) shouldBe null
+            f.corruptions.size shouldBe 1
+            f.store.healthContribution().state shouldBe RuntimeHealthState.DEGRADED
+            f.store.flushDirty()
+            f.await { f.writes == 1 }
+            block.chunk.persistentDataContainer.has(f.store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
+            f.store.healthContribution().state shouldBe RuntimeHealthState.UP
         }
+    }
 
-        "close flushes the final dirty snapshot" {
-            val plugin = runtime.createSimplePlugin("TrailCloseTest")
-            val world = runtime.addSimpleWorld("world")
-            val block = world.getBlockAt(6, 70, 8)
-            val expected = TrailBlockState(TrailIdentity("DirtPath", 0), 3)
-            val store = testStore(plugin)
-            store.write(block, expected)
-
-            store.close()
-
-            val reopened = testStore(plugin)
-            reopened.read(block) shouldBe expected
-            reopened.close()
-        }
-
-        "world save and unload never wait for blocked journal I/O and reload sees the latest queued state" {
-            val plugin = runtime.createSimplePlugin("TrailAsyncTest")
-            val world = runtime.addSimpleWorld("world")
-            val block = world.getBlockAt(0, 64, 0)
-            val journal = TrailChunkRecoveryJournal(plugin.dataFolder.toPath())
-            val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
-            val entered = java.util.concurrent.CountDownLatch(1)
-            val release = java.util.concurrent.CountDownLatch(1)
-            executor.execute {
-                entered.countDown()
-                check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
-            }
-            entered.await(1, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
-            val store = ChunkPersistentTrailStore(plugin, recoveryJournal = journal,
-                asyncJournal = AsyncTrailChunkJournal(journal, executor))
-            val first = TrailBlockState(TrailIdentity("DirtPath", 0), 1)
-            val newest = first.copy(walks = 9)
+    "close returns during blocked journal IO and retains the latest unloaded revision after actual drain" {
+        withStore { f ->
+            val block = f.block()
+            f.warm(block)
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            f.io.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
             try {
-                store.write(block, first)
-                store.onWorldSave(org.bukkit.event.world.WorldSaveEvent(world))
-                store.write(block, newest)
-                store.onChunkUnload(ChunkUnloadEvent(block.chunk, true))
-                store.cachedChunkCount() shouldBe 0
-                // Neither handler waited for the worker, and PDC has not advanced ahead of WAL.
-                release.count shouldBe 1L
-                journal.size() shouldBe 0
-                block.chunk.persistentDataContainer.has(store.storageKey, PersistentDataType.BYTE_ARRAY) shouldBe false
-                store.onChunkLoad(ChunkLoadEvent(block.chunk, false))
-                store.read(block) shouldBe newest
-            } finally {
+                f.store.write(block, TrailBlockState(null, 1))
+                f.store.flushDirty()
+                f.store.write(block, TrailBlockState(null, 9))
+                f.store.onChunkUnload(ChunkUnloadEvent(block.chunk, true))
+                val closing = f.store.closeAsync()
+                closing.isDone shouldBe false
+                f.writes shouldBe 0
+                val observer = f.store.closeAsync()
+                observer.cancel(false)
                 release.countDown()
-                store.close()
+                f.finish(closing)
+                f.closeStore()
+                f.reopen()
+                f.warm(block)
+                f.store.read(block)?.walks shouldBe 9
+            } finally { release.countDown() }
+        }
+    }
+
+    "foreign reference can become unloaded before capture without any cold chunk getter" {
+        withStore { f ->
+            val real = f.block()
+            val packed = TrailBlockPosition.pack(0, 64, 0)
+            real.chunk.persistentDataContainer.set(f.store.storageKey, PersistentDataType.BYTE_ARRAY,
+                TrailChunkCodec.encode(mapOf(packed to TrailBlockState(null, 9))))
+            val coldWorld = mockk<World>()
+            every { coldWorld.uid } returns f.world.uid
+            every { coldWorld.isChunkLoaded(any<Int>(), any<Int>()) } returns false
+            val reference = mockk<Block>()
+            every { reference.world } returns coldWorld
+            every { reference.x } returns 0
+            every { reference.y } returns 64
+            every { reference.z } returns 0
+            every { reference.chunk } throws AssertionError("foreign cursor cold-loaded a chunk")
+            val cleared = f.store.clearForeign(listOf(reference)) { it }
+            f.finish(cleared)
+            val patch = requireNotNull(f.journal.load(f.world.uid, real.chunk.chunkKey))
+            patch.baseKnown shouldBe false
+            patch.clearedPositions shouldBe setOf(packed)
+            f.closeStore()
+            f.reopen()
+            f.warm(real)
+            f.store.read(real) shouldBe null
+            f.store.write(real, TrailBlockState(null, 1))
+            f.store.flushDirty()
+            f.await { f.writes == 1 }
+            f.store.read(real)?.walks shouldBe 1
+        }
+    }
+
+    "foreign barrier invalidates only older affected guards and preserves a newer walk" {
+        withStore { f ->
+            val affected = f.block()
+            val unaffected = f.block(1, 64, 0)
+            f.warm(affected)
+            f.store.write(affected, TrailBlockState(null, 8))
+            var oldApplied = false
+            var unrelatedApplied = false
+            val old = f.store.whenReady(affected.chunk, f.store.mutationGuard(affected)) { oldApplied = true }
+            val unrelated = f.store.whenReady(unaffected.chunk, f.store.mutationGuard(unaffected)) { unrelatedApplied = true }
+            val cleared = f.store.clearForeign(listOf(affected)) { it }
+            val newest = f.store.whenReady(affected.chunk, f.store.mutationGuard(affected)) {
+                f.store.write(affected, TrailBlockState(null, 1))
             }
-            val reopened = testStore(plugin)
-            reopened.read(block) shouldBe newest
-            reopened.close()
+            f.finish(CompletableFuture.allOf(old, unrelated, cleared, newest))
+            oldApplied shouldBe false
+            unrelatedApplied shouldBe true
+            f.store.read(affected)?.walks shouldBe 1
+            f.store.pendingPositionCount() shouldBe 0
         }
+    }
 
-        "rejects Bukkit storage access away from the primary thread" {
-            val plugin = runtime.createSimplePlugin("TrailThreadTest")
-            val world = runtime.addSimpleWorld("world")
-            val block = world.getBlockAt(0, 64, 0)
-            val store = testStore(plugin)
+    "4096 delayed operations do not occupy native admission and reject only the excess operation" {
+        withStore { f ->
+            val block = f.block()
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            try {
+                var completed = 0
+                val accepted = (0 until 4096).map { f.store.whenReady(block.chunk) { completed++ } }
+                f.store.whenReady(block.chunk) {}.isCompletedExceptionally shouldBe true
+                f.store.pendingOperationCount() shouldBe 4096
+                val cleared = f.store.clearForeign(listOf(block)) { it }
+                var unrelated = false
+                val sentinel = f.queue.call({ true }) { unrelated = true }
+                f.finish(sentinel)
+                unrelated shouldBe true
+                completed shouldBe 0
+                release.countDown()
+                // Each same-chunk continuation deliberately waits for its predecessor and
+                // native.call has separate marshal/admission ticks. Drive all 4096 actual
+                // completions instead of imposing the small IO-fixture's eight-second budget.
+                f.finish(CompletableFuture.allOf(*accepted.toTypedArray(), cleared), timeoutSeconds = 30)
+                completed shouldBe 4096
+                f.store.pendingOperationCount() shouldBe 0
+            } finally { release.countDown() }
+        }
+    }
+
+    "foreign cursor rejection keeps its intent and uses a single retry after a queue slot is freed" {
+        withStore(maximumPending = 1) { f ->
+            var release = false
+            val blocker = f.queue.submit({ true }) { release }
+            val cleared = f.store.clearForeign(listOf(f.block())) { it }
+            repeat(4) { f.tick() }
+            cleared.isDone shouldBe false
+            f.journal.size() shouldBe 0
+            release = true
+            f.finish(CompletableFuture.allOf(blocker, cleared))
+            f.journal.size() shouldBe 1
+        }
+    }
+
+    "shutdown persists captured foreign coordinates and fails the actual drain for an uncaptured native tail" {
+        withStore { f ->
+            val blocks = (0 until 20).map { f.block(it, 64, 0) }
+            val clearing = f.store.clearForeign(blocks) { it }
+            f.tick()
+            clearing.isDone shouldBe false
+            shouldThrow<java.util.concurrent.CompletionException> { f.closeStore() }
+            clearing.isCompletedExceptionally shouldBe true
+            val persisted = f.journal.load(f.world.uid, blocks.first().chunk.chunkKey)
+            requireNotNull(persisted).clearedPositions.size shouldBe 7
+        }
+    }
+
+    "codec admission overload retains the numeric foreign clear and its unfinished barrier until retry" {
+        withStore { f ->
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            repeat(32) { f.codec.submit {} }
+            try {
+                val clearing = f.store.clearForeign(listOf(f.block())) { it }
+                repeat(20) { f.tick() }
+                clearing.isDone shouldBe false
+                f.journal.size() shouldBe 0
+                var unrelated = false
+                f.finish(f.queue.call({ true }) { unrelated = true })
+                unrelated shouldBe true
+                release.countDown()
+                f.finish(clearing)
+                requireNotNull(f.journal.load(f.world.uid, f.block().chunk.chunkKey)).clearedPositions shouldBe
+                    setOf(TrailBlockPosition.pack(0, 64, 0))
+            } finally { release.countDown() }
+        }
+    }
+
+    "storage rejects off-thread Bukkit access" {
+        withStore { f ->
+            val block = f.block()
             var failure: Throwable? = null
-
-            thread(name = "trail-storage-test") {
-                failure = runCatching { store.read(block) }.exceptionOrNull()
-            }.join()
-
+            thread(name = "trail-storage-test") { failure = runCatching { f.store.read(block) }.exceptionOrNull() }.join()
             failure.shouldBeInstanceOf<IllegalStateException>()
-            store.close()
+            shouldThrow<IllegalStateException> { f.store.read(block) }
         }
-    })
+    }
+})
 
-
-private fun testStore(
-    plugin: org.bukkit.plugin.Plugin,
-    corruptionSink: (org.bukkit.Chunk, Throwable) -> Unit = { _, _ -> },
-    persistenceFailureSink: (org.bukkit.Chunk, Throwable) -> Unit = { _, _ -> },
-    persistence: TrailChunkPersistence = BukkitTrailChunkPersistence,
-): ChunkPersistentTrailStore {
-    val journal = TrailChunkRecoveryJournal(plugin.dataFolder.toPath())
-    return ChunkPersistentTrailStore(
-        plugin, corruptionSink, persistenceFailureSink, persistence, journal,
-        AsyncTrailChunkJournal(journal, InlineJournalExecutor()),
-    )
+private inline fun withStore(maximumPending: Int = 4096, block: (StoreFixture) -> Unit) {
+    MockBukkitTestRuntime.open().use { paper ->
+        val fixture = StoreFixture(paper, maximumPending)
+        try { block(fixture) } finally { fixture.close() }
+    }
 }
 
-internal class InlineJournalExecutor : java.util.concurrent.AbstractExecutorService() {
-    private var stopped = false
-    override fun execute(command: Runnable) { check(!stopped); command.run() }
-    override fun shutdown() { stopped = true }
-    override fun shutdownNow(): MutableList<Runnable> { shutdown(); return mutableListOf() }
-    override fun isShutdown(): Boolean = stopped
-    override fun isTerminated(): Boolean = stopped
-    override fun awaitTermination(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean = stopped
+private class StoreFixture(private val paper: MockBukkitTestRuntime, maximumPending: Int) : AutoCloseable {
+    val plugin = paper.createSimplePlugin("TrailStoreTest")
+    val world = paper.addSimpleWorld("world")
+    val scheduler = TestTaskScheduler()
+    val scope = LifecycleTaskScope(scheduler)
+    val queue = BudgetedTaskQueue(scope, maximumSteps = 7, nanoTime = { 0L }, maximumPending = maximumPending)
+    var journal = TrailChunkRecoveryJournal(plugin.dataFolder.toPath())
+        private set
+    var io = BoundedAsyncExecutor("trail-test-journal", 1, 32)
+        private set
+    var codec = BoundedAsyncExecutor("trail-test-codec", 1, 32)
+        private set
+    var reads = 0
+    var writes = 0
+    var failWrites = false
+    val corruptions = mutableListOf<Throwable>()
+    val failures = mutableListOf<Throwable>()
+    private val persistence = object : TrailChunkPersistence {
+        override fun read(chunk: Chunk, key: NamespacedKey): ByteArray? {
+            Bukkit.isPrimaryThread() shouldBe true
+            reads++
+            return BukkitTrailChunkPersistence.read(chunk, key)
+        }
+        override fun write(chunk: Chunk, key: NamespacedKey, encoded: ByteArray?) {
+            Bukkit.isPrimaryThread() shouldBe true
+            if (failWrites) throw IllegalStateException("simulated native PDC failure")
+            writes++
+            BukkitTrailChunkPersistence.write(chunk, key, encoded)
+        }
+    }
+    var store = createStore()
+        private set
+    private var closedStore = false
+
+    private fun createStore() = ChunkPersistentTrailStore(plugin, queue, journal,
+        corruptionSink = { _, error -> Bukkit.isPrimaryThread() shouldBe true; corruptions += error },
+        persistenceFailureSink = { _, error -> Bukkit.isPrimaryThread() shouldBe true; failures += error },
+        persistence = persistence, asyncJournal = AsyncTrailChunkJournal(journal, io), codec = codec)
+
+    fun block(x: Int = 0, y: Int = 64, z: Int = 0): Block = world.getBlockAt(x, y, z).also { it.type = Material.GRASS_BLOCK }
+    fun warm(block: Block) { finish(store.prepare(block.chunk)) }
+    fun tick() { scheduler.tick(); paper.performTicks(1); Thread.sleep(1) }
+    fun await(timeoutSeconds: Long = 8, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+        while (!condition() && System.nanoTime() < deadline) tick()
+        condition() shouldBe true
+    }
+    fun finish(future: CompletableFuture<*>, timeoutSeconds: Long = 8) { await(timeoutSeconds) { future.isDone }; future.join() }
+    fun closeStore() {
+        if (closedStore) return
+        try { finish(store.closeAsync()) } finally { closedStore = true }
+    }
+    fun reopen() {
+        check(closedStore)
+        journal = TrailChunkRecoveryJournal(plugin.dataFolder.toPath())
+        io = BoundedAsyncExecutor("trail-test-journal-reopened", 1, 32)
+        codec = BoundedAsyncExecutor("trail-test-codec-reopened", 1, 32)
+        store = createStore()
+        closedStore = false
+    }
+    override fun close() {
+        try { closeStore() } finally { queue.close(); scope.close() }
+    }
 }

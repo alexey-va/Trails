@@ -13,6 +13,7 @@ import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityChangeBlockEvent
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.runtime.PaperNativeCleanupServiceProvider
 import ru.ruscrafting.trails.bukkit.RoadManager
 import ru.ruscrafting.trails.config.RoadSettingsLoader
 import ru.ruscrafting.trails.config.YamlConfig
@@ -23,14 +24,21 @@ class RoadTerrainIntegrationTest :
         lateinit var server: ServerMock
         lateinit var plugin: TrailsPlugin
         lateinit var runtime: MockBukkitTestRuntime
+        lateinit var nativeCleanup: PaperNativeCleanupServiceProvider
 
         beforeTest {
             runtime = MockBukkitTestRuntime.open()
             server = runtime.server
+            val cleanupHost = runtime.createSimplePlugin("ArcCore")
+            nativeCleanup = PaperNativeCleanupServiceProvider(cleanupHost)
             plugin = runtime.loadPlugin(TrailsPlugin::class.java)
+            awaitTrailsReady(plugin, runtime)
         }
 
         afterTest {
+            server.pluginManager.disablePlugin(plugin)
+            plugin.drained().awaitTrails(server)
+            nativeCleanup.close()
             runtime.close()
         }
 
@@ -48,7 +56,7 @@ class RoadTerrainIntegrationTest :
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             setOf(Material.COARSE_DIRT, Material.ROOTED_DIRT, Material.PODZOL) shouldContain
                 world.getBlockAt(1, 64, 1).type
@@ -72,7 +80,7 @@ class RoadTerrainIntegrationTest :
 
             plugin.roadStart(admin, "boardwalk")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 66.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             (-1..1).forEach { z ->
                 val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
@@ -99,7 +107,7 @@ class RoadTerrainIntegrationTest :
 
             plugin.roadStart(admin, "royal-big")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 66.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             (-3..3).forEach { z ->
                 val stairs = world.getBlockAt(1, 65, z).blockData as Stairs
@@ -127,7 +135,7 @@ class RoadTerrainIntegrationTest :
             plugin.roadStart(admin, "royal-big")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 66.0, 0.5))
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 6.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             (-3..3).forEach { z ->
                 val data = world.getBlockAt(2, 65, z).blockData
@@ -170,7 +178,7 @@ class RoadTerrainIntegrationTest :
             try {
                 manager.start(admin, "cherry_avenue").message shouldBe "messages.roadStarted"
                 manager.capture(admin, Location(world, 1.5, 66.0, 0.5)) shouldBe true
-                manager.commit(admin).message shouldBe "messages.roadCommitted"
+                manager.commit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
                 val transitionMaterials =
                     (-2..2).map { z ->
@@ -198,7 +206,7 @@ class RoadTerrainIntegrationTest :
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(1, 65, 0).type shouldBe Material.AIR
             (-1..1).forEach { z ->
@@ -224,7 +232,7 @@ class RoadTerrainIntegrationTest :
 
             plugin.roadStart(admin, "cherry_avenue")
             plugin.captureRoadMovement(admin, Location(world, 4.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             for (x in 1..3) {
                 for (z in -1..1) {
@@ -249,7 +257,7 @@ class RoadTerrainIntegrationTest :
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 3.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             for (x in 1..2) {
                 for (z in -1..1) {
@@ -259,7 +267,7 @@ class RoadTerrainIntegrationTest :
                 }
             }
 
-            plugin.roadUndo(admin).message shouldBe "messages.roadUndone"
+            plugin.roadUndo(admin).awaitTrails(server).message shouldBe "messages.roadUndone"
             world.getBlockAt(1, 65, 0).type shouldBe Material.STONE_SLAB
             world.getBlockAt(2, 65, 0).type shouldBe Material.STONE_SLAB
             for (x in 1..2) {
@@ -282,14 +290,14 @@ class RoadTerrainIntegrationTest :
 
             plugin.roadStart(admin, "rustic")
             plugin.captureRoadMovement(admin, Location(world, 2.5, 65.0, 0.5))
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
 
             world.getBlockAt(1, 65, 0).type shouldBe Material.AIR
             world.getBlockAt(1, 65, 1).type shouldBe Material.AIR
             plugin.inspectTrail(world.getBlockAt(1, 65, 0)) shouldBe null
             plugin.inspectTrail(world.getBlockAt(1, 65, 1)) shouldBe null
 
-            plugin.roadUndo(admin).message shouldBe "messages.roadUndone"
+            plugin.roadUndo(admin).awaitTrails(server).message shouldBe "messages.roadUndone"
             world.getBlockAt(1, 65, 0).type shouldBe Material.SHORT_GRASS
             world.getBlockAt(1, 65, 1).type shouldBe Material.POPPY
         }
@@ -321,7 +329,7 @@ class RoadTerrainIntegrationTest :
             plugin.roadStart(builder, "rustic")
             plugin.captureRoadMovement(builder, Location(world, 2.5, 65.0, 0.5))
 
-            plugin.roadCommit(builder).message shouldBe "messages.roadProtected"
+            plugin.roadCommit(builder).awaitTrails(server).message shouldBe "messages.roadProtected"
             world.getBlockAt(1, 65, 0).type shouldBe Material.SHORT_GRASS
             world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
         }
@@ -350,7 +358,7 @@ class RoadTerrainIntegrationTest :
             plugin.roadStatus(admin)
             world.getBlockAt(1, 64, 1).type = Material.CHEST
 
-            plugin.roadCommit(admin).message shouldBe "messages.roadCommitted"
+            plugin.roadCommit(admin).awaitTrails(server).message shouldBe "messages.roadCommitted"
             setOf(Material.DIRT_PATH, Material.COARSE_DIRT) shouldContain world.getBlockAt(1, 64, 0).type
             world.getBlockAt(1, 64, 1).type shouldBe Material.CHEST
         }
@@ -369,7 +377,7 @@ private fun enableRoads(
         roadsPath,
         customize(enabled),
     )
-    plugin.reloadTrails().getOrThrow()
+    plugin.reloadTrails().awaitTrails(plugin.server as ServerMock).getOrThrow()
 }
 
 private fun transitionBucket(

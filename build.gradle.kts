@@ -1,6 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.gradle.api.file.DuplicatesStrategy
 import java.math.BigDecimal
+import java.security.MessageDigest
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -10,7 +11,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.14"
+version = "2.3.15"
 
 repositories {
     mavenCentral()
@@ -39,7 +40,7 @@ repositories {
 
 dependencies {
     compileOnly(libs.paper.api)
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.33")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.38")
 
     implementation(libs.bstats.bukkit)
     implementation(libs.arc.core.paper) {
@@ -56,7 +57,7 @@ dependencies {
     testImplementation(libs.kotest.assertions.core)
     testImplementation(libs.mockk)
     testImplementation(libs.arc.core.paper.testing)
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.33")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.38")
     testImplementation(libs.placeholder.api)
     testRuntimeOnly(libs.coreprotect)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -115,12 +116,13 @@ tasks.shadowJar {
     archiveClassifier.set("")
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     exclude("ru/arc/paper/api/**")
-        exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
-        exclude("ru/arc/paper/sql/SharedPaperSqlService*.class")
-        exclude("ru/arc/paper/redis/PaperRedisServiceProvider*.class")
-        exclude("ru/arc/paper/redis/SharedPaperRedisService*.class")
-        exclude("ru/arc/paper/metrics/PaperArcMetricsProvider*.class")
+    exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
+    exclude("ru/arc/paper/sql/SharedPaperSqlService*.class")
+    exclude("ru/arc/paper/redis/PaperRedisServiceProvider*.class")
+    exclude("ru/arc/paper/redis/SharedPaperRedisService*.class")
+    exclude("ru/arc/paper/metrics/PaperArcMetricsProvider*.class")
     exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
+    exclude("ru/arc/paper/runtime/PaperNativeCleanupServiceProvider*.class")
     filesMatching("META-INF/LICENSE-arc-core.txt") {
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
@@ -214,7 +216,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
             "Shadow relocated the shared ARC telemetry contract"
         }
         val notices = zipTree(jar).matching { include("THIRD_PARTY_NOTICES.txt") }.singleFile.readText()
-        listOf("Kotlin standard library 2.4.10", "JetBrains Java annotations 13.0", "arc-core and arc-core-paper 2.7.33", "bStats base and Bukkit 3.2.1")
+        listOf("Kotlin standard library 2.4.10", "JetBrains Java annotations 13.0", "arc-core and arc-core-paper 2.7.38", "bStats base and Bukkit 3.2.1")
             .forEach { dependency -> check(dependency in notices) { "THIRD_PARTY_NOTICES is missing $dependency" } }
         val shadedRuntimeVersions =
             configurations.runtimeClasspath.get().resolvedConfiguration.resolvedArtifacts.associate { artifact ->
@@ -225,8 +227,8 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
             "org.jetbrains:annotations" to "13.0",
             "org.bstats:bstats-base" to "3.2.1",
             "org.bstats:bstats-bukkit" to "3.2.1",
-            "ru.ruscrafting.arc:arc-core" to "2.7.33",
-            "ru.ruscrafting.arc:arc-core-paper" to "2.7.33",
+            "ru.ruscrafting.arc:arc-core" to "2.7.38",
+            "ru.ruscrafting.arc:arc-core-paper" to "2.7.38",
         ).forEach { (module, expectedVersion) ->
             check(shadedRuntimeVersions[module] == expectedVersion) {
                 "Shaded runtime inventory mismatch for $module: expected $expectedVersion, found ${shadedRuntimeVersions[module]}"
@@ -247,6 +249,21 @@ tasks.check {
 }
 
 // E2E runs separately from check: a disposable real Paper server and Mineflayer clients.
+val e2eArcCoreJar = providers.gradleProperty("e2eArcCoreJar").map { file(it) }
+val verifyE2eProvider = tasks.register("verifyE2eProvider") {
+    inputs.file(e2eArcCoreJar).optional()
+    doLast {
+        val provider = requireNotNull(e2eArcCoreJar.orNull) {
+            "Supply -Pe2eArcCoreJar=/absolute/path/ArcCore-0.1.12.jar for the real Paper fixture"
+        }
+        val digest = MessageDigest.getInstance("SHA-256").digest(provider.readBytes()).joinToString("") { "%02x".format(it) }
+        require(digest == "93158072f30ad3d7d5201acdf9036324841c4455844b4f1b650cfea0d8540502") {
+            "ArcCore 0.1.12 fixture checksum mismatch: $digest"
+        }
+    }
+}
+tasks.withType<me.drownek.plugwright.AbstractPlugwrightTask>().configureEach { dependsOn(verifyE2eProvider) }
+
 plugwright {
     minecraftVersion.set("1.21.11")
     runDir.set(layout.buildDirectory.dir("plugwright"))
@@ -256,6 +273,7 @@ plugwright {
     acceptEula.set(true)
     jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
     writeFiles {
+        e2eArcCoreJar.orNull?.let { file("plugins/ArcCore.jar", it) }
         file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
         file("plugins/Trails/config.yml", projectDir.resolve("src/test/e2e/fixtures/config.yml"))
         file("plugins/Trails/roads.yml", projectDir.resolve("src/main/resources/roads.yml").readText()

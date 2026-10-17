@@ -10,7 +10,7 @@ import java.util.UUID
 import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import java.util.concurrent.CompletableFuture
 import ru.arc.persistence.DurableAcknowledgementOutcome
 
 class AsyncTrailChunkJournalTest :
@@ -19,7 +19,7 @@ class AsyncTrailChunkJournalTest :
             val root = Files.createTempDirectory("trails-async-journal-")
             val executor = ManualExecutor()
             val journal = TrailChunkRecoveryJournal(root)
-            val async = AsyncTrailChunkJournal(journal, executor)
+            val async = manualJournal(journal, executor)
             val first = snapshot(1, 1)
             val second = snapshot(2, 2)
 
@@ -42,7 +42,7 @@ class AsyncTrailChunkJournalTest :
             val root = Files.createTempDirectory("trails-async-coalesce-")
             val executor = ManualExecutor()
             val journal = TrailChunkRecoveryJournal(root)
-            val async = AsyncTrailChunkJournal(journal, executor)
+            val async = manualJournal(journal, executor)
             val old = snapshot(3, 3)
             val latest = snapshot(3, 9)
 
@@ -61,7 +61,7 @@ class AsyncTrailChunkJournalTest :
             val root = Files.createTempDirectory("trails-async-overlay-")
             val executor = ManualExecutor()
             val journal = TrailChunkRecoveryJournal(root)
-            val async = AsyncTrailChunkJournal(journal, executor)
+            val async = manualJournal(journal, executor)
             val pending = snapshot(4, 4)
 
             async.commit(pending)
@@ -77,7 +77,7 @@ class AsyncTrailChunkJournalTest :
             val root = Files.createTempDirectory("trails-async-ack-")
             val executor = ManualExecutor()
             val journal = TrailChunkRecoveryJournal(root)
-            val async = AsyncTrailChunkJournal(journal, executor)
+            val async = manualJournal(journal, executor)
             val old = snapshot(5, 1)
             val latest = snapshot(5, 2)
 
@@ -96,7 +96,7 @@ class AsyncTrailChunkJournalTest :
             val root = Files.createTempDirectory("trails-async-retry-")
             val executor = ManualExecutor(rejectNext = true)
             val journal = TrailChunkRecoveryJournal(root)
-            val async = AsyncTrailChunkJournal(journal, executor)
+            val async = manualJournal(journal, executor)
             val pending = snapshot(6, 6)
 
             val completion = async.commit(pending)
@@ -122,7 +122,7 @@ class AsyncTrailChunkJournalTest :
                 if (attempts == 1) throw IllegalStateException("simulated acknowledgement failure")
                 DurableAcknowledgementOutcome.ACKNOWLEDGED
             }
-            val async = AsyncTrailChunkJournal(recovery, executor)
+            val async = manualJournal(recovery, executor)
 
             async.acknowledge(snapshot(8, 8))
             executor.runNext()
@@ -136,16 +136,65 @@ class AsyncTrailChunkJournalTest :
             async.close()
         }
 
-        "bounds close when a journal task never runs and cancels the executor" {
+        "failed clear retains its exact pending intent and readiness waits for a successful retry" {
+            val root = Files.createTempDirectory("trails-clear-retry-")
+            val executor = ManualExecutor(rejectNext = true)
+            val journal = TrailChunkRecoveryJournal(root)
+            val async = manualJournal(journal, executor)
+            val position = TrailBlockPosition.pack(1, 64, 2)
+            val firstAttempt = async.clearPositions(UUID(0L, 7L), 9L, setOf(position))
+            firstAttempt.isCompletedExceptionally shouldBe true
+            async.hasUncommittedClear(UUID(0L, 7L), 9L) shouldBe true
+            val durable = async.awaitClear(UUID(0L, 7L), 9L)
+            durable.isDone shouldBe false
+
+            shouldThrow<IllegalStateException> { async.reap() }
+            executor.runAll()
+            durable.join()
+            async.hasUncommittedClear(UUID(0L, 7L), 9L) shouldBe false
+            journal.load(UUID(0L, 7L), 9L)?.clearedPositions shouldBe setOf(position)
+            async.reap()
+            async.close()
+        }
+
+        "a new clear after a durable predecessor does not erase a later walk at the old position" {
+            val root = Files.createTempDirectory("trails-clear-after-walk-")
+            val executor = ManualExecutor()
+            val journal = TrailChunkRecoveryJournal(root)
+            val async = manualJournal(journal, executor)
+            val first = TrailBlockPosition.pack(1, 64, 2)
+            val second = TrailBlockPosition.pack(2, 64, 2)
+            val cleared = async.clearPositions(UUID(0L, 7L), 10L, setOf(first))
+            executor.runAll()
+            val base = cleared.join()
+            val newer = TrailChunkSnapshot(base.worldId, base.chunkKey,
+                TrailChunkCodec.encode(mapOf(first to TrailBlockState(null, 1))), revision = base.revision)
+            async.commit(newer)
+            executor.runAll()
+            val later = async.clearPositions(base.worldId, base.chunkKey, setOf(second))
+            executor.runAll()
+            later.join().clearedPositions shouldBe setOf(second)
+            TrailChunkCodec.decode(requireNotNull(journal.load(base.worldId, base.chunkKey)).encodedStates)[first]?.walks shouldBe 1
+            async.close()
+        }
+
+        "close dispatch retains accepted work and observer cancellation cannot cancel its actual drain" {
             val root = Files.createTempDirectory("trails-async-close-")
             val executor = ManualExecutor()
             val journal = TrailChunkRecoveryJournal(root)
-            val async = AsyncTrailChunkJournal(journal, executor)
+            val async = manualJournal(journal, executor)
             async.commit(snapshot(7, 7))
 
-            shouldThrow<TimeoutException> { async.close(timeoutSeconds = 0) }
+            val observer = async.closeAsync()
+            observer.isDone shouldBe false
+            observer.cancel(false)
+            val actualObserver = async.closeAsync()
+            actualObserver.isDone shouldBe false
+            executor.isShutdown shouldBe false
+            executor.runAll()
+            actualObserver.join()
             executor.isShutdown shouldBe true
-            executor.cancelledTasks shouldBe 1
+            executor.cancelledTasks shouldBe 0
         }
     })
 
@@ -216,3 +265,6 @@ private class ManualExecutor(
 
     override fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean = isTerminated
 }
+
+private fun manualJournal(journal: TrailChunkRecoveryJournal, executor: ManualExecutor) =
+    AsyncTrailChunkJournal(journal, executor) { executor.shutdown(); CompletableFuture.completedFuture(Unit) }

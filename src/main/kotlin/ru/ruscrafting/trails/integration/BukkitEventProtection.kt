@@ -7,6 +7,7 @@ import org.bukkit.entity.Player
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.block.BlockFadeEvent
 import org.bukkit.event.entity.EntityChangeBlockEvent
+import org.bukkit.event.Event
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.PluginManager
@@ -19,6 +20,14 @@ import org.bukkit.plugin.PluginManager
 class BukkitEventProtection(
     private val pluginManager: PluginManager,
 ) {
+    private val probes = java.util.IdentityHashMap<Event, Boolean>()
+
+    fun isProbe(event: Event): Boolean = probes.containsKey(event)
+
+    private fun dispatch(event: Event) {
+        probes[event] = true
+        try { pluginManager.callEvent(event) } finally { probes.remove(event) }
+    }
     fun canChange(
         player: Player,
         block: Block,
@@ -26,7 +35,7 @@ class BukkitEventProtection(
         blockPlaceCompatibility: Boolean = true,
     ): Boolean {
         val event = EntityChangeBlockEvent(player, block, target.createBlockData())
-        pluginManager.callEvent(event)
+        dispatch(event)
         if (event.isCancelled) return false
         if (!blockPlaceCompatibility) return true
 
@@ -41,7 +50,7 @@ class BukkitEventProtection(
                 true,
                 EquipmentSlot.HAND,
             )
-        pluginManager.callEvent(placeEvent)
+        dispatch(placeEvent)
         return !placeEvent.isCancelled && placeEvent.canBuild()
     }
 
@@ -52,7 +61,7 @@ class BukkitEventProtection(
         val state = block.state
         state.type = target
         val event = BlockFadeEvent(block, state)
-        pluginManager.callEvent(event)
+        dispatch(event)
         return !event.isCancelled
     }
 }

@@ -1,59 +1,70 @@
 package ru.ruscrafting.trails.storage
 
 import ru.ruscrafting.trails.config.YamlConfig
+import ru.arc.core.BoundedAsyncExecutor
+import ru.arc.persistence.CoalescingAsyncWriter
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
+/** Construct/load on storage; native getters and mutations only access the in-memory map. */
 class PlayerPreferencesStore(
     dataFolder: Path,
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Trails-player-data").apply { isDaemon = true }
-    },
+    private val executor: BoundedAsyncExecutor = BoundedAsyncExecutor("Trails-player-data"),
     private val onSaveFailure: (Throwable) -> Unit = {},
 ) : AutoCloseable {
-    private val config = YamlConfig(prepareLegacyFile(dataFolder), "players.yml")
+    private val config = try { YamlConfig(prepareLegacyFile(dataFolder), "players.yml") }
+        catch (failure: Throwable) { executor.close(); throw failure }
     private val preferences = ConcurrentHashMap<UUID, PlayerPreferences>()
+    private val closed = AtomicBoolean()
+    private val drain = CompletableFuture<Unit>()
+    private val writer = CoalescingAsyncWriter<Unit> { executor.submit { persist(snapshot()) } }
 
     init {
-        load()
+        try { load() } catch (failure: Throwable) { executor.close(); throw failure }
     }
 
     fun get(uuid: UUID): PlayerPreferences = preferences[uuid] ?: PlayerPreferences()
 
     fun setEnabled(uuid: UUID, enabled: Boolean) {
+        check(!closed.get()) { "Player preferences are closed" }
         preferences.compute(uuid) { _, current -> (current ?: PlayerPreferences()).copy(enabled = enabled) }
     }
 
     fun setBoost(uuid: UUID, boost: Boolean) {
+        check(!closed.get()) { "Player preferences are closed" }
         preferences.compute(uuid) { _, current -> (current ?: PlayerPreferences()).copy(boost = boost) }
     }
 
     fun saveAsync() {
-        val snapshot = snapshot()
-        executor.execute {
-            runCatching { persist(snapshot) }.onFailure(onSaveFailure)
+        if (closed.get()) return
+        // The coalesced marker is constant-size; enumeration/sort/YAML stay on storage.
+        writer.submit(Unit).whenComplete { _, failure ->
+            if (failure != null) onSaveFailure(failure.cause ?: failure)
         }
     }
 
+    /** Worker-only explicit snapshot; lifecycle shutdown uses closeAsync instead. */
     fun saveNow() = persist(snapshot())
 
     internal fun snapshot(): Map<UUID, PlayerPreferences> = preferences.toMap()
 
-    override fun close() {
-        executor.shutdown()
-        if (!executor.awaitTermination(CLOSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
-            executor.shutdownNow()
-            check(executor.awaitTermination(CLOSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
-                "Timed out while saving Trails player preferences"
+    override fun close() { closeAsync() }
+
+    fun closeAsync(): CompletableFuture<Unit> {
+        if (closed.compareAndSet(false, true)) {
+            // A final latest snapshot may recover a failed periodic write. Wait for every
+            // coalesced admission before sealing the worker's reserved terminal slot.
+            writer.closeAsync().handle { _, _ -> Unit }.thenCompose {
+                executor.closeAsync { persist(snapshot()) }
+            }.whenComplete { _, failure ->
+                if (failure == null) drain.complete(Unit) else drain.completeExceptionally(failure)
             }
         }
-        saveNow()
+        return drain.copy()
     }
 
     private fun load() {
@@ -96,8 +107,6 @@ class PlayerPreferencesStore(
         }
 
     companion object {
-        private val CLOSE_TIMEOUT: Duration = Duration.ofSeconds(10)
-
         private fun prepareLegacyFile(dataFolder: Path): Path {
             val path = dataFolder.resolve("players.yml")
             if (Files.exists(path)) {
