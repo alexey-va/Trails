@@ -142,10 +142,19 @@ test('native idle decay regresses a worn trail after the fixture idle window', a
     await consoleCommands(server, player, commands);
   };
   await diagnose('before_wait');
+  // This three-block fixture needs up to three eligible passes at 100% decay:
+  // clear its base-stage edge neighbours, count the centre down to zero, then
+  // regress its DIRT stage to GRASS_BLOCK (TrailProgressEngine.decay/edge-first).
+  // Allow one already-running pass whose captured time predates the idle minute.
+  // CI observed 121 loaded chunks across three worlds. Six queued scheduler turns
+  // per chunk plus the 20-tick interval is a conservative scan allowance, not an IO SLA.
+  const idleWindowMs = 60_000; // fixtures/config.yml minimum-idle-minutes: 1
+  const scanAllowanceMs = 121 * 6 * 50 + 20 * 50;
+  const decayWaitBudgetMs = idleWindowMs + 4 * scanAllowanceMs + 20_000; // 229,200ms incl. CI slack
   try {
     await waitUntil(() => blockAt(player, 1, 32) === 'grass_block', {
       signal,
-      timeout: 90000,
+      timeout: decayWaitBudgetMs,
       interval: 500,
       message: 'Native idle trail decay did not restore the worn block',
     });
