@@ -131,12 +131,28 @@ test('native idle decay regresses a worn trail after the fixture idle window', a
   await hasBlock(player, 1, 32, 'dirt', signal);
   // Stay on the prepared floor, beyond the five-block decay exclusion radius.
   await player.teleport(10.5, 65, 32.5);
-  await waitUntil(() => blockAt(player, 1, 32) === 'grass_block', {
-    signal,
-    timeout: 90000,
-    interval: 500,
-    message: 'Native idle trail decay did not restore the worn block',
-  });
+  const diagnose = async (phase) => {
+    console.log(`TRAILS_DECAY_DIAGNOSTIC phase=${phase} wall_ms=${Date.now()} client_material=${blockAt(player, 1, 32)} player=${player.bot.entity.position}`);
+    const commands = [
+      'trails debug inspect world 1 64 32',
+      `minecraft:execute if loaded 1 64 32 run tellraw ${player.username} {"text":"decay-diagnostic-target-loaded-${phase}"}`,
+    ];
+    // Stats enumerates chunk metadata, so only request it after the original oracle failed.
+    if (phase === 'failure') commands.unshift('trails debug stats');
+    await consoleCommands(server, player, commands);
+  };
+  await diagnose('before_wait');
+  try {
+    await waitUntil(() => blockAt(player, 1, 32) === 'grass_block', {
+      signal,
+      timeout: 90000,
+      interval: 500,
+      message: 'Native idle trail decay did not restore the worn block',
+    });
+  } catch (error) {
+    await diagnose('failure').catch((diagnosticError) => console.error('Decay diagnostic failed', diagnosticError));
+    throw error;
+  }
   assert.equal(blockAt(player, 1, 32), 'grass_block');
 });
 
