@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.16"
+version = "2.3.17"
 
 repositories {
     mavenCentral()
@@ -40,7 +40,7 @@ repositories {
 
 dependencies {
     compileOnly(libs.paper.api)
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.38")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.41")
 
     implementation(libs.bstats.bukkit)
     implementation(libs.arc.core.paper) {
@@ -57,7 +57,7 @@ dependencies {
     testImplementation(libs.kotest.assertions.core)
     testImplementation(libs.mockk)
     testImplementation(libs.arc.core.paper.testing)
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.38")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.41")
     testImplementation(libs.placeholder.api)
     testRuntimeOnly(libs.coreprotect)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -216,7 +216,7 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
             "Shadow relocated the shared ARC telemetry contract"
         }
         val notices = zipTree(jar).matching { include("THIRD_PARTY_NOTICES.txt") }.singleFile.readText()
-        listOf("Kotlin standard library 2.4.10", "JetBrains Java annotations 13.0", "arc-core and arc-core-paper 2.7.38", "bStats base and Bukkit 3.2.1")
+        listOf("Kotlin standard library 2.4.10", "JetBrains Java annotations 13.0", "arc-core and arc-core-paper 2.7.41", "bStats base and Bukkit 3.2.1")
             .forEach { dependency -> check(dependency in notices) { "THIRD_PARTY_NOTICES is missing $dependency" } }
         val shadedRuntimeVersions =
             configurations.runtimeClasspath.get().resolvedConfiguration.resolvedArtifacts.associate { artifact ->
@@ -227,8 +227,8 @@ val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
             "org.jetbrains:annotations" to "13.0",
             "org.bstats:bstats-base" to "3.2.1",
             "org.bstats:bstats-bukkit" to "3.2.1",
-            "ru.ruscrafting.arc:arc-core" to "2.7.38",
-            "ru.ruscrafting.arc:arc-core-paper" to "2.7.38",
+            "ru.ruscrafting.arc:arc-core" to "2.7.41",
+            "ru.ruscrafting.arc:arc-core-paper" to "2.7.41",
         ).forEach { (module, expectedVersion) ->
             check(shadedRuntimeVersions[module] == expectedVersion) {
                 "Shaded runtime inventory mismatch for $module: expected $expectedVersion, found ${shadedRuntimeVersions[module]}"
