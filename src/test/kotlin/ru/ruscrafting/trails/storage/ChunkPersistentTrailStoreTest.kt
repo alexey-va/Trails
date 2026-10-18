@@ -281,17 +281,16 @@ class ChunkPersistentTrailStoreTest : FreeSpec({
         }
     }
 
-    "foreign cursor rejection keeps its intent and uses a single retry after a queue slot is freed" {
+    "foreign cursor completes beyond the legacy allocation hint while earlier work remains pending" {
         withStore(maximumPending = 1) { f ->
             var release = false
             val blocker = f.queue.submit({ true }) { release }
             val cleared = f.store.clearForeign(listOf(f.block())) { it }
-            repeat(4) { f.tick() }
-            cleared.isDone shouldBe false
-            f.journal.size() shouldBe 0
-            release = true
-            f.finish(CompletableFuture.allOf(blocker, cleared))
+            f.finish(cleared)
+            blocker.isDone shouldBe false
             f.journal.size() shouldBe 1
+            release = true
+            f.finish(blocker)
         }
     }
 
