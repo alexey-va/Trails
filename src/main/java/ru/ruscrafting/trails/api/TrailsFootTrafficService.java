@@ -4,6 +4,7 @@ import java.util.concurrent.CompletionStage;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.block.Block;
 
 /**
  * Trails-owned Bukkit service for observed native NPC footsteps. The Trails plugin owns these API
@@ -11,6 +12,14 @@ import org.bukkit.entity.Player;
  * through ServicesManager.
  */
 public interface TrailsFootTrafficService {
+    /**
+     * Current walking multiplier of one already-loaded ground block, on the server thread.
+     * Returns 1 outside enabled worlds, while metadata is not ready, or without a tracked trail.
+     * Read-only: never prepares metadata or loads chunks. Consumers use the same value for routing
+     * and their native NPC movement. Older providers retain ordinary speed through this default.
+     */
+    default double speedMultiplier(Block ground) { return 1.0; }
+
     /**
      * Records one horizontal block crossing by a living entity carrying Citizens' {@code NPC}
      * metadata. Call on the server thread, once per observed step, with the actual before/after

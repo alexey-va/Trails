@@ -31,9 +31,11 @@ class TrailsFootTrafficIntegrationTest : FunSpec({
             h.server.dispatchCommand(h.authority, "trails off")
             h.server.dispatchCommand(h.authority, "trails boost off")
             val speed = h.authority.walkSpeed
+            h.service.speedMultiplier(h.ground) shouldBe 1.0
             val results = (1..5).flatMap { listOf(h.step(), h.step(reverse = true)) }
             CompletableFuture.allOf(*results.toTypedArray()).awaitTrails(h.server)
             h.ground.type shouldBe Material.DIRT
+            (h.service.speedMultiplier(h.ground) > 1.0) shouldBe true
             h.plugin.inspectTrail(h.ground)?.identity?.serialize() shouldBe "DirtPath:1"
             results.count { it.join() == StepResult.CHANGED } shouldBe 2
             h.authority.walkSpeed shouldBe speed
@@ -78,6 +80,7 @@ class TrailsFootTrafficIntegrationTest : FunSpec({
             h.plugin.config.set("worlds.names", listOf(h.world.name))
             h.plugin.saveConfig(); h.plugin.reloadTrails().awaitTrails(h.server)
             h.step().awaitTrails(h.server) shouldBe StepResult.IGNORED
+            h.service.speedMultiplier(h.ground) shouldBe 1.0
             val invalidThread = CompletableFuture.supplyAsync { h.service.recordStep(h.npc, h.authority, h.from(), h.to()) }
             shouldThrow<CompletionException> { invalidThread.join() }.cause!!::class shouldBe IllegalStateException::class
             h.plugin.inspectTrail(h.ground)?.walks shouldBe 1

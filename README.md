@@ -152,7 +152,7 @@ including failed runs. To run one scenario locally, use `-PtestNames="road previ
 
 ## Build
 
-NPC integrations use the Java-only `ru.ruscrafting:trails-api:2.3.18` contract with
+NPC integrations use the Java-only `ru.ruscrafting:trails-api:2.3.19` contract with
 `compileOnly`, add `softdepend: [Trails]`, and resolve
 `ru.ruscrafting.trails.api.TrailsFootTrafficService` through Bukkit's services manager
 at the point of use. The Trails runtime owns the API classes; consumers must not shade them.

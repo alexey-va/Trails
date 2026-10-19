@@ -67,6 +67,13 @@ import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.atomic.LongAdder
 
 open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
+    override fun speedMultiplier(ground: org.bukkit.block.Block): Double {
+        check(Bukkit.isPrimaryThread()) { "Trails surface speed requires the server thread" }
+        if (!ready || !settings.worldEnabled(ground.world.name) ||
+            !ground.world.isChunkLoaded(ground.x shr 4, ground.z shr 4) || !blockStore.isSettled(ground.chunk)) return 1.0
+        return trailService.speedMultiplier(ground, settings.speedBoostOnlyTrails)
+    }
+
     @Volatile
     lateinit var settings: TrailsSettings
         private set
