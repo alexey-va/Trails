@@ -7,15 +7,19 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.Chunk
+import org.bukkit.Bukkit
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.BlockData
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
+import org.bukkit.entity.Entity
+import org.bukkit.entity.LivingEntity
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.Plugin
+import org.bukkit.plugin.ServicePriority
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.core.BoundedAsyncExecutor
@@ -32,6 +36,7 @@ import ru.ruscrafting.trails.bukkit.TrailsListener
 import ru.ruscrafting.trails.bukkit.TrailToolKind
 import ru.ruscrafting.trails.bukkit.TrailFeedback
 import ru.ruscrafting.trails.bukkit.TrailVisibilityController
+import ru.ruscrafting.trails.bukkit.trailMovementDirection
 import ru.ruscrafting.trails.config.LocaleService
 import ru.ruscrafting.trails.config.RoadSettings
 import ru.ruscrafting.trails.config.TrailsConfiguration
@@ -43,6 +48,10 @@ import ru.ruscrafting.trails.integration.CoreProtectObserver
 import ru.ruscrafting.trails.integration.TrailsPlaceholderExpansion
 import ru.ruscrafting.trails.service.BlockChangeObserver
 import ru.ruscrafting.trails.service.TrailService
+import ru.ruscrafting.trails.service.TrailMovementContext
+import ru.ruscrafting.trails.service.TrailWalkResult
+import ru.ruscrafting.trails.api.TrailsFootTrafficService
+import ru.ruscrafting.trails.api.TrailsFootTrafficService.StepResult
 import ru.ruscrafting.trails.storage.ChunkPersistentTrailStore
 import ru.ruscrafting.trails.storage.PlayerPreferencesStore
 import ru.ruscrafting.trails.storage.TrailBlockState
@@ -53,10 +62,11 @@ import java.nio.file.Files
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
 import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.atomic.LongAdder
 
-open class TrailsPlugin : JavaPlugin() {
+open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     @Volatile
     lateinit var settings: TrailsSettings
         private set
@@ -207,6 +217,8 @@ open class TrailsPlugin : JavaPlugin() {
                 )
             }
             lifecycle.registerHealth("storage", blockStore::healthContribution)
+            server.servicesManager.register(TrailsFootTrafficService::class.java, this, this, ServicePriority.Normal)
+            lifecycle.own(AutoCloseable { server.servicesManager.unregister(TrailsFootTrafficService::class.java, this) })
             lifecycle.ready("trails" to settings.definitions.size, "roads" to roadSettings.profiles.size)
             ready = true
             lifecycle.reportHealthEvery(HEALTH_REPORT_TICKS)
@@ -355,9 +367,63 @@ open class TrailsPlugin : JavaPlugin() {
         }
     }
 
-    private inline fun measureMovement(operation: () -> Unit) {
+    override fun recordStep(actualNpc: Entity, authority: Player, from: Location, to: Location): CompletionStage<StepResult> {
+        check(Bukkit.isPrimaryThread()) { "Trails NPC footsteps must run on the server thread" }
+        if (!ready) return CompletableFuture.completedFuture(StepResult.IGNORED)
+        val origin = from.clone()
+        val destination = to.clone()
+        val world = actualNpc.world
+        if (actualNpc !is LivingEntity || !actualNpc.isValid || actualNpc.isDead || !actualNpc.hasMetadata("NPC") ||
+            !authority.isOnline || authority.hasMetadata("NPC") || authority.world.uid != world.uid ||
+            origin.world?.uid != world.uid || destination.world?.uid != world.uid ||
+            listOf(origin.x, origin.y, origin.z, destination.x, destination.y, destination.z).any { !it.isFinite() } ||
+            origin.blockX == destination.blockX && origin.blockZ == destination.blockZ ||
+            origin.distanceSquared(destination) > 2.25 || actualNpc.location.distanceSquared(destination) > 0.01 ||
+            !world.isChunkLoaded(origin.blockX shr 4, origin.blockZ shr 4)) {
+            return CompletableFuture.completedFuture(StepResult.IGNORED)
+        }
+        val lifecycle = pluginRuntime ?: return CompletableFuture.completedFuture(StepResult.IGNORED)
+        val store = blockStore
+        val service = trailService
+        val configuration = settings
+        if (!configuration.worldEnabled(world.name) ||
+            configuration.usePermissionForTrails && !authority.hasPermission("trails.create-trails"))
+            return CompletableFuture.completedFuture(StepResult.IGNORED)
+        val direction = trailMovementDirection(origin, destination)
+        val block = origin.subtract(0.0, 0.1, 0.0).block
+        fun process(): StepResult {
+            if (!ready || pluginRuntime !== lifecycle || blockStore !== store || trailService !== service ||
+                settings !== configuration || !actualNpc.isValid || actualNpc.isDead || !actualNpc.hasMetadata("NPC") ||
+                actualNpc.world.uid != world.uid || !authority.isOnline || authority.hasMetadata("NPC") ||
+                authority.world.uid != world.uid || !configuration.worldEnabled(world.name) ||
+                configuration.usePermissionForTrails && !authority.hasPermission("trails.create-trails")) return StepResult.IGNORED
+            return when (walkTrail(authority, service.movementContext(block), direction, sprinting = false, notifyDenial = false)) {
+                TrailWalkResult.NoChange -> StepResult.NO_CHANGE
+                is TrailWalkResult.Counted, is TrailWalkResult.PopularCounted -> StepResult.COUNTED
+                is TrailWalkResult.Advanced, is TrailWalkResult.Widened -> StepResult.CHANGED
+            }
+        }
+        val npcId = actualNpc.uniqueId
+        val previous = movements[npcId]
+        if (store.isSettled(block.chunk) && (previous == null || previous.isDone)) {
+            return try { CompletableFuture.completedFuture(measureMovement(::process)) }
+            catch (failure: Exception) { CompletableFuture.failedFuture(failure) }
+        }
+        val result = CompletableFuture<StepResult>()
+        val pending = store.whenReady(block.chunk, store.mutationGuard(block), previous) {
+            result.complete(measureMovement(::process))
+        }
+        movements[npcId] = pending
+        pending.whenComplete { _, failure ->
+            movements.remove(npcId, pending)
+            if (failure == null) result.complete(StepResult.IGNORED) else result.completeExceptionally(failure)
+        }
+        return result
+    }
+
+    private inline fun <T> measureMovement(operation: () -> T): T {
         val startedAt = System.nanoTime()
-        try { operation() } finally {
+        return try { operation() } finally {
             movementSamples.increment()
             movementProcessingNanos.add(System.nanoTime() - startedAt)
         }
@@ -396,19 +462,20 @@ open class TrailsPlugin : JavaPlugin() {
         val canCreate =
             if (settings.usePermissionForTrails) player.hasPermission("trails.create-trails") else trailsEnabled(player.uniqueId)
         if (!canCreate) return
-        val result =
-            trailService.walk(
-                player = player,
-                context = movementContext,
-                sprintModifier = settings.runModifier,
-                popularThreshold = settings.popularRoutes.terminalWalks.takeIf { settings.popularRoutes.enabled },
-                wideningDirection = movementDirection,
-                sprinting = sprinting,
-            ) { targetBlock, target ->
-                checkEventProtection(player, targetBlock, target)
-            }
+        val result = walkTrail(player, movementContext, movementDirection, sprinting, notifyDenial = true)
         trailFeedback.onWalk(player, block, result)
     }
+
+    private fun walkTrail(authority: Player, context: TrailMovementContext, direction: BlockFace?, sprinting: Boolean,
+        notifyDenial: Boolean): TrailWalkResult =
+        trailService.walk(
+            player = authority,
+            context = context,
+            sprintModifier = settings.runModifier,
+            popularThreshold = settings.popularRoutes.terminalWalks.takeIf { settings.popularRoutes.enabled },
+            wideningDirection = direction,
+            sprinting = sprinting,
+        ) { targetBlock, target -> checkEventProtection(authority, targetBlock, target, notifyDenial) }
 
     fun captureRoadMovement(
         player: Player,
@@ -880,6 +947,7 @@ open class TrailsPlugin : JavaPlugin() {
         player: Player,
         block: Block,
         target: Material,
+        notifyDenial: Boolean = true,
     ): Boolean =
         checkProtectionResult(
             player,
@@ -889,12 +957,13 @@ open class TrailsPlugin : JavaPlugin() {
                 target,
                 settings.integrations.blockPlaceCompatibilityEvent,
             ),
+            notifyDenial,
         )
 
-    private fun checkProtectionResult(player: Player, allowed: Boolean): Boolean {
+    private fun checkProtectionResult(player: Player, allowed: Boolean, notifyDenial: Boolean = true): Boolean {
         if (allowed) return true
         protectionVetoes.increment()
-        if (settings.sendDenyMessage && denyMessageCooldown.add(player.uniqueId)) {
+        if (notifyDenial && settings.sendDenyMessage && denyMessageCooldown.add(player.uniqueId)) {
             message(player, "messages.cantCreateTrails")
             server.scheduler.runTaskLater(
                 this,

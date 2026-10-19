@@ -39,6 +39,7 @@ class TrailsListener(
 ) : Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onMove(event: PlayerMoveEvent) {
+        if (event.player.hasMetadata("NPC")) return // NPC integrations submit actual steps through the typed service.
         val to = event.to
         val from = event.from
         if (from.world !== to.world ||
@@ -52,7 +53,7 @@ class TrailsListener(
             event.player,
             from.clone().subtract(0.0, 0.1, 0.0).block,
             createTrail = !capturingRoad,
-            movementDirection = horizontalDirection(from, to),
+            movementDirection = trailMovementDirection(from, to),
         )
     }
 
@@ -204,14 +205,15 @@ class TrailsListener(
         plugin.restoreSpeed(player)
     }
 
-    private fun horizontalDirection(from: Location, to: Location): BlockFace? {
-        val x = to.x - from.x
-        val z = to.z - from.z
-        if (x == 0.0 && z == 0.0) return null
-        return if (abs(x) >= abs(z)) {
-            if (x >= 0.0) BlockFace.EAST else BlockFace.WEST
-        } else {
-            if (z >= 0.0) BlockFace.SOUTH else BlockFace.NORTH
-        }
+}
+
+internal fun trailMovementDirection(from: Location, to: Location): BlockFace? {
+    val x = to.x - from.x
+    val z = to.z - from.z
+    if (x == 0.0 && z == 0.0) return null
+    return if (abs(x) >= abs(z)) {
+        if (x >= 0.0) BlockFace.EAST else BlockFace.WEST
+    } else {
+        if (z >= 0.0) BlockFace.SOUTH else BlockFace.NORTH
     }
 }

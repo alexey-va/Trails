@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.17"
+version = "2.3.18"
 
 repositories {
     mavenCentral()
@@ -137,6 +137,50 @@ tasks.jar {
     archiveClassifier.set("plain")
 }
 
+val apiJar = tasks.register<Jar>("apiJar") {
+    group = "build"
+    description = "Builds the Java-only Trails API contract for compileOnly consumers."
+    dependsOn(tasks.classes)
+    archiveBaseName.set("trails-api")
+    from(sourceSets.main.get().output) { include("ru/ruscrafting/trails/api/**") }
+    from("src/main/resources/META-INF/licenses/Trails-UNLICENSE.txt") { into("META-INF/licenses") }
+}
+
+val apiSourcesJar = tasks.register<Jar>("apiSourcesJar") {
+    group = "build"
+    archiveBaseName.set("trails-api")
+    archiveClassifier.set("sources")
+    from(sourceSets.main.get().allSource) { include("ru/ruscrafting/trails/api/**") }
+    from("src/main/resources/META-INF/licenses/Trails-UNLICENSE.txt") { into("META-INF/licenses") }
+}
+
+val verifyFootTrafficApi = tasks.register("verifyFootTrafficApi") {
+    group = "verification"
+    dependsOn(apiJar, apiSourcesJar, tasks.shadowJar)
+    doLast {
+        val api = zipTree(apiJar.get().archiveFile)
+        val runtime = zipTree(tasks.shadowJar.get().archiveFile)
+        val classes = setOf("ru/ruscrafting/trails/api/TrailsFootTrafficService.class",
+            "ru/ruscrafting/trails/api/TrailsFootTrafficService\$StepResult.class")
+        val entries = mutableSetOf<String>()
+        api.visit { if (!isDirectory && relativePath.pathString.endsWith(".class")) entries += relativePath.pathString }
+        check(entries == classes) { "Trails API must contain only the Java contract: $entries" }
+        for (entry in classes) {
+            val contract = api.matching { include(entry) }.singleFile.readBytes()
+            val provider = runtime.matching { include(entry) }.singleFile.readBytes()
+            check(contract.contentEquals(provider)) { "Trails runtime/API class mismatch: $entry" }
+            check(((contract[6].toInt() and 0xff) shl 8) or (contract[7].toInt() and 0xff) == 69) {
+                "Trails API must target Java 25: $entry"
+            }
+            check(contract.toString(Charsets.ISO_8859_1).let { "kotlin/" !in it && "ru/arc/" !in it }) {
+                "Trails API must not expose a plugin-local Kotlin or Core runtime: $entry"
+            }
+        }
+    }
+}
+
+tasks.assemble { dependsOn(apiJar, apiSourcesJar) }
+
 tasks.build {
     dependsOn(tasks.shadowJar)
 }
@@ -144,7 +188,7 @@ tasks.build {
 val verifyPluginArtifact = tasks.register("verifyPluginArtifact") {
     group = "verification"
     description = "Verifies the deployable Trails shadow JAR contract."
-    dependsOn(tasks.shadowJar)
+    dependsOn(tasks.shadowJar, verifyFootTrafficApi)
     doLast {
         val jar = tasks.shadowJar.get().archiveFile.get().asFile
         val entries = mutableSetOf<String>()

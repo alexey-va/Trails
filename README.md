@@ -152,6 +152,21 @@ including failed runs. To run one scenario locally, use `-PtestNames="road previ
 
 ## Build
 
+NPC integrations use the Java-only `ru.ruscrafting:trails-api:2.3.18` contract with
+`compileOnly`, add `softdepend: [Trails]`, and resolve
+`ru.ruscrafting.trails.api.TrailsFootTrafficService` through Bukkit's services manager
+at the point of use. The Trails runtime owns the API classes; consumers must not shade them.
+Call `recordStep(actualNpc, authority, from, to)` on the server thread for each observed
+horizontal block crossing, with a real online managing player in the same world.
+Samples over 1.5 blocks and teleports are ignored; reset the previous position after teleporting.
+NPC steps reuse ordinary wear, widening, chunk persistence and owner-attributed protection,
+with normal walking weight and no player preferences, speed or feedback.
+The result describes processing, while the existing chunk journal flush remains asynchronous.
+The complete method contract is in
+[`TrailsFootTrafficService.java`](src/main/java/ru/ruscrafting/trails/api/TrailsFootTrafficService.java).
+Build the contract and its sources with `./gradlew apiJar apiSourcesJar`;
+`verifyPluginArtifact` also verifies that the API JAR and runtime contain identical Java contracts.
+
 ```bash
 ./gradlew shadowJar
 ```
@@ -159,7 +174,7 @@ including failed runs. To run one scenario locally, use `-PtestNames="road previ
 For a focused change, run the relevant unit test explicitly, for example
 `./gradlew test --tests '*TrailsConfigurationTest' shadowJar`. Full coverage and artifact
 verification are opt-in with `./gradlew clean check shadowJar`; the deployable
-JAR is written to `build/libs/Trails-2.3.5.jar`.
+JAR is written to `build/libs/Trails-2.3.18.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

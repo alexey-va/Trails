@@ -1,0 +1,206 @@
+package ru.ruscrafting.trails
+
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+import io.mockk.every
+import io.mockk.mockk
+import org.bukkit.Location
+import org.bukkit.Material
+import org.bukkit.block.Biome
+import org.bukkit.entity.Player
+import org.bukkit.event.EventPriority
+import org.bukkit.event.Listener
+import org.bukkit.event.block.BlockPlaceEvent
+import org.bukkit.event.entity.EntityChangeBlockEvent
+import org.bukkit.event.player.PlayerMoveEvent
+import ru.arc.paper.runtime.PaperNativeCleanupServiceProvider
+import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.ruscrafting.trails.api.TrailsFootTrafficService
+import ru.ruscrafting.trails.api.TrailsFootTrafficService.StepResult
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+
+class TrailsFootTrafficIntegrationTest : FunSpec({
+    test("the typed service records every cold NPC step with normal weight and no personal settings or boost") {
+        trafficScenario { h ->
+            h.plugin.config.set("trail-creation.sprint-progress-multiplier", 0.0)
+            h.plugin.saveConfig(); h.plugin.reloadTrails().awaitTrails(h.server).isSuccess shouldBe true
+            h.authority.isSprinting = true
+            h.server.dispatchCommand(h.authority, "trails off")
+            h.server.dispatchCommand(h.authority, "trails boost off")
+            val speed = h.authority.walkSpeed
+            val results = (1..5).flatMap { listOf(h.step(), h.step(reverse = true)) }
+            CompletableFuture.allOf(*results.toTypedArray()).awaitTrails(h.server)
+            h.ground.type shouldBe Material.DIRT
+            h.plugin.inspectTrail(h.ground)?.identity?.serialize() shouldBe "DirtPath:1"
+            results.count { it.join() == StepResult.CHANGED } shouldBe 2
+            h.authority.walkSpeed shouldBe speed
+            h.plugin.trailsEnabled(h.authority.uniqueId) shouldBe false
+            h.plugin.boostEnabled(h.authority.uniqueId) shouldBe false
+            h.npc.isOnline shouldBe false // Citizens' fake Player is not a connected client.
+        }
+    }
+
+    test("non NPC actors stationary samples teleports mismatched positions and unloaded chunks do not count") {
+        trafficScenario { h ->
+            h.tagged = false
+            h.step().join() shouldBe StepResult.IGNORED
+            h.tagged = true
+            val from = h.from()
+            for (to in listOf(from.clone(), from.clone().add(0.0, 1.0, 0.0), from.clone().add(3.0, 0.0, 0.0),
+                from.clone().apply { x = Double.NaN })) {
+                h.position = to
+                h.service.recordStep(h.npc, h.authority, from, to).toCompletableFuture().join() shouldBe StepResult.IGNORED
+            }
+            h.position = h.to().add(0.3, 0.0, 0.0)
+            h.service.recordStep(h.npc, h.authority, from, h.to()).toCompletableFuture().join() shouldBe StepResult.IGNORED
+            val distantFrom = from.clone().add(1_600.0, 0.0, 0.0)
+            val distantTo = h.to().add(1_600.0, 0.0, 0.0)
+            h.position = distantTo
+            h.world.isChunkLoaded(100, 0) shouldBe false
+            h.service.recordStep(h.npc, h.authority, distantFrom, distantTo).toCompletableFuture().join() shouldBe StepResult.IGNORED
+            h.world.isChunkLoaded(100, 0) shouldBe false
+            h.plugin.awaitTrailData(h.ground.chunk).awaitTrails(h.server)
+            h.plugin.inspectTrail(h.ground) shouldBe null
+        }
+    }
+
+    test("NPC traffic enforces the global world and authority permission gates and the owning thread") {
+        trafficScenario { h ->
+            h.plugin.config.set("trail-creation.require-permission", true)
+            h.plugin.saveConfig(); h.plugin.reloadTrails().awaitTrails(h.server)
+            h.step().awaitTrails(h.server) shouldBe StepResult.IGNORED
+            h.authority.addAttachment(h.plugin, "trails.create-trails", true)
+            h.step().awaitTrails(h.server) shouldBe StepResult.COUNTED
+            h.plugin.config.set("worlds.mode", "blocklist")
+            h.plugin.config.set("worlds.names", listOf(h.world.name))
+            h.plugin.saveConfig(); h.plugin.reloadTrails().awaitTrails(h.server)
+            h.step().awaitTrails(h.server) shouldBe StepResult.IGNORED
+            val invalidThread = CompletableFuture.supplyAsync { h.service.recordStep(h.npc, h.authority, h.from(), h.to()) }
+            shouldThrow<CompletionException> { invalidThread.join() }.cause!!::class shouldBe IllegalStateException::class
+            h.plugin.inspectTrail(h.ground)?.walks shouldBe 1
+        }
+    }
+
+    for (veto in listOf("entity", "canBuild")) test("the ordinary $veto protection probe uses the online manager and retains the last counter") {
+        trafficScenario { h ->
+            h.plugin.config.set("messages.protection-denied.enabled", true)
+            h.plugin.saveConfig(); h.plugin.reloadTrails().awaitTrails(h.server)
+            var transitions = 0
+            h.server.pluginManager.registerEvent(EntityChangeBlockEvent::class.java, object : Listener {}, EventPriority.NORMAL,
+                { _, raw ->
+                    val event = raw as EntityChangeBlockEvent
+                    event.entity shouldBe h.authority
+                    transitions++
+                    if (veto == "entity") event.isCancelled = true
+                }, h.plugin)
+            h.server.pluginManager.registerEvent(BlockPlaceEvent::class.java, object : Listener {}, EventPriority.NORMAL,
+                { _, raw ->
+                    val event = raw as BlockPlaceEvent
+                    event.player shouldBe h.authority
+                    if (veto == "canBuild") event.setBuild(false)
+                }, h.plugin)
+            repeat(4) { h.step().awaitTrails(h.server) shouldBe StepResult.COUNTED }
+            transitions shouldBe 0
+            h.step().awaitTrails(h.server) shouldBe StepResult.NO_CHANGE
+            transitions shouldBe 1
+            h.ground.type shouldBe Material.GRASS_BLOCK
+            h.plugin.inspectTrail(h.ground)?.walks shouldBe 4
+            h.authority.nextMessage() shouldBe null
+        }
+    }
+
+    for (exit in listOf("actor", "authority", "foreign-edit"))
+        test("cold steps are fenced after $exit before any native change") {
+            trafficScenario { h ->
+                val pending = h.step()
+                pending.isDone shouldBe false
+                when (exit) {
+                    "actor" -> h.valid = false
+                    "authority" -> h.authority.teleport(Location(h.server.addSimpleWorld("elsewhere"), 0.5, 65.0, 0.5))
+                    "foreign-edit" -> h.ground.type = Material.STONE
+                }
+                pending.awaitTrails(h.server) shouldBe StepResult.IGNORED
+                h.plugin.awaitTrailData(h.ground.chunk).awaitTrails(h.server)
+                h.plugin.inspectTrail(h.ground) shouldBe null
+            }
+        }
+
+    test("disabling the provider retires a pending cold step without changing the world") {
+        trafficScenario { h ->
+            val pending = h.step()
+            pending.isDone shouldBe false
+            h.server.pluginManager.disablePlugin(h.plugin)
+            pending.handle { result, failure -> result == StepResult.IGNORED || failure != null }.awaitTrails(h.server) shouldBe true
+            h.ground.type shouldBe Material.GRASS_BLOCK
+            h.server.servicesManager.load(TrailsFootTrafficService::class.java) shouldBe null
+        }
+    }
+
+    test("API coordinates are copied and native PlayerMoveEvent does not submit a second NPC step") {
+        trafficScenario { h ->
+            val from = h.from()
+            val to = h.to()
+            h.position = to.clone()
+            val pending = h.service.recordStep(h.npc, h.authority, from, to).toCompletableFuture()
+            from.x = 1_600.0; to.x = 1_601.0
+            pending.awaitTrails(h.server) shouldBe StepResult.COUNTED
+            h.server.pluginManager.callEvent(PlayerMoveEvent(h.npc, h.from(), h.to()))
+            h.plugin.inspectTrail(h.ground)?.walks shouldBe 1
+            h.server.pluginManager.disablePlugin(h.plugin)
+            h.server.servicesManager.load(TrailsFootTrafficService::class.java) shouldBe null
+            h.step().join() shouldBe StepResult.IGNORED
+        }
+    }
+})
+
+private fun trafficScenario(block: (FootTrafficScenario) -> Unit) {
+    MockBukkitTestRuntime.open().use { runtime ->
+        val h = FootTrafficScenario(runtime)
+        try { block(h) } finally { h.close() }
+    }
+}
+
+private class FootTrafficScenario(runtime: MockBukkitTestRuntime) : AutoCloseable {
+    val server = runtime.server
+    private val cleanup = PaperNativeCleanupServiceProvider(runtime.createSimplePlugin("ArcCore"))
+    val plugin = runtime.loadPlugin(TrailsPlugin::class.java).also { awaitTrailsReady(it, runtime) }
+    val service = requireNotNull(server.servicesManager.load(TrailsFootTrafficService::class.java))
+    val world = server.addSimpleWorld("foot_traffic")
+    val authority = server.addPlayer("Manager")
+    val npc = mockk<Player>(relaxed = true)
+    var position = to()
+    var valid = true
+    var tagged = true
+    val ground = world.getBlockAt(0, 64, 0)
+
+    init {
+        world.loadChunk(0, 0)
+        for (x in 0..1) world.getBlockAt(x, 64, 0).also { it.type = Material.GRASS_BLOCK; it.biome = Biome.THE_VOID }
+        authority.teleport(Location(world, 0.5, 65.0, 0.5))
+        every { npc.uniqueId } returns UUID.randomUUID()
+        every { npc.world } returns world
+        every { npc.location } answers { position.clone() }
+        every { npc.isValid } answers { valid }
+        every { npc.isDead } returns false
+        every { npc.isOnline } returns false
+        every { npc.hasMetadata("NPC") } answers { tagged }
+    }
+
+    fun from() = Location(world, 0.9, 65.0, 0.5)
+    fun to() = Location(world, 1.1, 65.0, 0.5)
+    fun step(reverse: Boolean = false): CompletableFuture<StepResult> {
+        val from = if (reverse) to() else from()
+        val to = if (reverse) from() else to()
+        position = to.clone()
+        return service.recordStep(npc, authority, from, to).toCompletableFuture()
+    }
+
+    override fun close() {
+        server.pluginManager.disablePlugin(plugin)
+        plugin.drained().awaitTrails(server)
+        cleanup.close()
+    }
+}
