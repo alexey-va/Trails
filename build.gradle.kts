@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.19"
+version = "2.3.20"
 
 repositories {
     mavenCentral()
@@ -161,6 +161,7 @@ val verifyFootTrafficApi = tasks.register("verifyFootTrafficApi") {
         val api = zipTree(apiJar.get().archiveFile)
         val runtime = zipTree(tasks.shadowJar.get().archiveFile)
         val classes = setOf("ru/ruscrafting/trails/api/TrailsFootTrafficService.class",
+            "ru/ruscrafting/trails/api/TrailsFootTrafficActor.class",
             "ru/ruscrafting/trails/api/TrailsFootTrafficService\$StepResult.class")
         val entries = mutableSetOf<String>()
         api.visit { if (!isDirectory && relativePath.pathString.endsWith(".class")) entries += relativePath.pathString }

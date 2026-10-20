@@ -7,7 +7,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.block.Block;
 
 /**
- * Trails-owned Bukkit service for observed native NPC footsteps. The Trails plugin owns these API
+ * Trails-owned Bukkit service for observed NPC footsteps. The Trails plugin owns these API
  * classes at runtime; consumers depend on the contract JAR with compileOnly and resolve this service
  * through ServicesManager.
  */
@@ -40,6 +40,18 @@ public interface TrailsFootTrafficService {
      * @throws IllegalStateException when called outside the server thread
      */
     CompletionStage<StepResult> recordStep(Entity actualNpc, Player authority, Location from, Location to);
+
+    /**
+     * Records an observed step of an authoritative packet-only actor with the same
+     * movement, authority, protection and persistence rules as the native overload.
+     * Validity is checked again after asynchronous preparation; the actor may have
+     * continued walking in the same world, but retired actors cannot mutate terrain.
+     * Older providers ignore this additive entry point.
+     */
+    default CompletionStage<StepResult> recordStep(
+            TrailsFootTrafficActor actor, Player authority, Location from, Location to) {
+        return java.util.concurrent.CompletableFuture.completedFuture(StepResult.IGNORED);
+    }
 
     enum StepResult {
         /** Unavailable runtime, invalid authority/actor, stale context or a non-walking sample. */

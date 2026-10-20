@@ -152,12 +152,15 @@ including failed runs. To run one scenario locally, use `-PtestNames="road previ
 
 ## Build
 
-NPC integrations use the Java-only `ru.ruscrafting:trails-api:2.3.19` contract with
+NPC integrations use the Java-only `ru.ruscrafting:trails-api:2.3.20` contract with
 `compileOnly`, add `softdepend: [Trails]`, and resolve
 `ru.ruscrafting.trails.api.TrailsFootTrafficService` through Bukkit's services manager
 at the point of use. The Trails runtime owns the API classes; consumers must not shade them.
 Call `recordStep(actualNpc, authority, from, to)` on the server thread for each observed
 horizontal block crossing, with a real online managing player in the same world.
+Native Citizens actors use the existing `Entity` overload. Packet-only actors use
+`TrailsFootTrafficActor`, exposing their actual position and lifecycle validity;
+retirement or a world change fences any pending step without creating an entity.
 Samples over 1.5 blocks and teleports are ignored; reset the previous position after teleporting.
 NPC steps reuse ordinary wear, widening, chunk persistence and owner-attributed protection,
 with normal walking weight and no player preferences, speed or feedback.

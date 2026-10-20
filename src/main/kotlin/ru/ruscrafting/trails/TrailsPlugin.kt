@@ -51,6 +51,7 @@ import ru.ruscrafting.trails.service.TrailService
 import ru.ruscrafting.trails.service.TrailMovementContext
 import ru.ruscrafting.trails.service.TrailWalkResult
 import ru.ruscrafting.trails.api.TrailsFootTrafficService
+import ru.ruscrafting.trails.api.TrailsFootTrafficActor
 import ru.ruscrafting.trails.api.TrailsFootTrafficService.StepResult
 import ru.ruscrafting.trails.storage.ChunkPersistentTrailStore
 import ru.ruscrafting.trails.storage.PlayerPreferencesStore
@@ -375,17 +376,28 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     }
 
     override fun recordStep(actualNpc: Entity, authority: Player, from: Location, to: Location): CompletionStage<StepResult> {
+        return recordStep(object : TrailsFootTrafficActor {
+            override fun uniqueId(): UUID = actualNpc.uniqueId
+            override fun location(): Location = actualNpc.location
+            override fun isValid(): Boolean = actualNpc is LivingEntity && actualNpc.isValid &&
+                !actualNpc.isDead && actualNpc.hasMetadata("NPC")
+        }, authority, from, to)
+    }
+
+    override fun recordStep(actualNpc: TrailsFootTrafficActor, authority: Player, from: Location, to: Location): CompletionStage<StepResult> {
         check(Bukkit.isPrimaryThread()) { "Trails NPC footsteps must run on the server thread" }
         if (!ready) return CompletableFuture.completedFuture(StepResult.IGNORED)
         val origin = from.clone()
         val destination = to.clone()
-        val world = actualNpc.world
-        if (actualNpc !is LivingEntity || !actualNpc.isValid || actualNpc.isDead || !actualNpc.hasMetadata("NPC") ||
-            !authority.isOnline || authority.hasMetadata("NPC") || authority.world.uid != world.uid ||
+        if (!actualNpc.isValid) return CompletableFuture.completedFuture(StepResult.IGNORED)
+        val position = actualNpc.location()
+        val world = position.world ?: return CompletableFuture.completedFuture(StepResult.IGNORED)
+        if (!authority.isOnline || authority.hasMetadata("NPC") || authority.world.uid != world.uid ||
             origin.world?.uid != world.uid || destination.world?.uid != world.uid ||
-            listOf(origin.x, origin.y, origin.z, destination.x, destination.y, destination.z).any { !it.isFinite() } ||
+            listOf(origin.x, origin.y, origin.z, destination.x, destination.y, destination.z,
+                position.x, position.y, position.z).any { !it.isFinite() } ||
             origin.blockX == destination.blockX && origin.blockZ == destination.blockZ ||
-            origin.distanceSquared(destination) > 2.25 || actualNpc.location.distanceSquared(destination) > 0.01 ||
+            origin.distanceSquared(destination) > 2.25 || position.distanceSquared(destination) > 0.01 ||
             !world.isChunkLoaded(origin.blockX shr 4, origin.blockZ shr 4)) {
             return CompletableFuture.completedFuture(StepResult.IGNORED)
         }
@@ -400,8 +412,8 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
         val block = origin.subtract(0.0, 0.1, 0.0).block
         fun process(): StepResult {
             if (!ready || pluginRuntime !== lifecycle || blockStore !== store || trailService !== service ||
-                settings !== configuration || !actualNpc.isValid || actualNpc.isDead || !actualNpc.hasMetadata("NPC") ||
-                actualNpc.world.uid != world.uid || !authority.isOnline || authority.hasMetadata("NPC") ||
+                settings !== configuration || !actualNpc.isValid ||
+                actualNpc.location().world?.uid != world.uid || !authority.isOnline || authority.hasMetadata("NPC") ||
                 authority.world.uid != world.uid || !configuration.worldEnabled(world.name) ||
                 configuration.usePermissionForTrails && !authority.hasPermission("trails.create-trails")) return StepResult.IGNORED
             return when (walkTrail(authority, service.movementContext(block), direction, sprinting = false, notifyDenial = false)) {
@@ -410,7 +422,7 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
                 is TrailWalkResult.Advanced, is TrailWalkResult.Widened -> StepResult.CHANGED
             }
         }
-        val npcId = actualNpc.uniqueId
+        val npcId = actualNpc.uniqueId()
         val previous = movements[npcId]
         if (store.isSettled(block.chunk) && (previous == null || previous.isDone)) {
             return try { CompletableFuture.completedFuture(measureMovement(::process)) }

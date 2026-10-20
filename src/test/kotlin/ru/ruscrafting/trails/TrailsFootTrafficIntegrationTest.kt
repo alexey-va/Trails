@@ -17,12 +17,59 @@ import org.bukkit.event.player.PlayerMoveEvent
 import ru.arc.paper.runtime.PaperNativeCleanupServiceProvider
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.trails.api.TrailsFootTrafficService
+import ru.ruscrafting.trails.api.TrailsFootTrafficActor
 import ru.ruscrafting.trails.api.TrailsFootTrafficService.StepResult
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 
 class TrailsFootTrafficIntegrationTest : FunSpec({
+    test("packet-only actors use ordinary progression without spawning a native entity") {
+        trafficScenario { h ->
+            val entities = h.world.entities.map { it.uniqueId }.toSet()
+            val results = (1..5).flatMap { listOf(h.virtualStep(), h.virtualStep(reverse = true)) }
+            CompletableFuture.allOf(*results.toTypedArray()).awaitTrails(h.server)
+            h.ground.type shouldBe Material.DIRT
+            results.count { it.join() == StepResult.CHANGED } shouldBe 2
+            h.world.entities.map { it.uniqueId }.toSet() shouldBe entities
+        }
+    }
+
+    for (exit in listOf("retired", "world", "authority", "foreign-edit")) {
+        test("packet-only cold steps are fenced after $exit") {
+            trafficScenario { h ->
+                val pending = h.virtualStep()
+                pending.isDone shouldBe false
+                when (exit) {
+                    "retired" -> h.valid = false
+                    "world" -> h.position.world = h.server.addSimpleWorld("elsewhere")
+                    "authority" -> h.authority.disconnect()
+                    "foreign-edit" -> h.ground.type = Material.STONE
+                }
+                pending.awaitTrails(h.server) shouldBe StepResult.IGNORED
+                h.plugin.awaitTrailData(h.ground.chunk).awaitTrails(h.server)
+                h.plugin.inspectTrail(h.ground) shouldBe null
+            }
+        }
+    }
+
+    test("packet-only movement rejects teleport samples and honors the real manager protection veto") {
+        trafficScenario { h ->
+            h.position = h.to().add(10.0, 0.0, 0.0)
+            h.service.recordStep(h.virtualActor, h.authority, h.from(), h.position)
+                .toCompletableFuture().join() shouldBe StepResult.IGNORED
+            h.server.pluginManager.registerEvent(EntityChangeBlockEvent::class.java, object : Listener {},
+                EventPriority.NORMAL, { _, raw ->
+                    val event = raw as EntityChangeBlockEvent
+                    event.entity shouldBe h.authority
+                    event.isCancelled = true
+                }, h.plugin)
+            repeat(4) { h.virtualStep().awaitTrails(h.server) shouldBe StepResult.COUNTED }
+            h.virtualStep().awaitTrails(h.server) shouldBe StepResult.NO_CHANGE
+            h.ground.type shouldBe Material.GRASS_BLOCK
+        }
+    }
+
     test("the typed service records every cold NPC step with normal weight and no personal settings or boost") {
         trafficScenario { h ->
             h.plugin.config.set("trail-creation.sprint-progress-multiplier", 0.0)
@@ -178,6 +225,12 @@ private class FootTrafficScenario(runtime: MockBukkitTestRuntime) : AutoCloseabl
     var valid = true
     var tagged = true
     val ground = world.getBlockAt(0, 64, 0)
+    val virtualActor = object : TrailsFootTrafficActor {
+        private val id = UUID.randomUUID()
+        override fun uniqueId(): UUID = id
+        override fun location(): Location = position.clone()
+        override fun isValid(): Boolean = valid
+    }
 
     init {
         world.loadChunk(0, 0)
@@ -199,6 +252,13 @@ private class FootTrafficScenario(runtime: MockBukkitTestRuntime) : AutoCloseabl
         val to = if (reverse) from() else to()
         position = to.clone()
         return service.recordStep(npc, authority, from, to).toCompletableFuture()
+    }
+
+    fun virtualStep(reverse: Boolean = false): CompletableFuture<StepResult> {
+        val from = if (reverse) to() else from()
+        val to = if (reverse) from() else to()
+        position = to.clone()
+        return service.recordStep(virtualActor, authority, from, to).toCompletableFuture()
     }
 
     override fun close() {
