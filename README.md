@@ -65,6 +65,11 @@ for detailed chat output. Fully worn routes can add one protected shoulder on ea
 traffic, but never spread beyond three blocks. Decay waits for a long inactivity window, starts conservatively after a
 restart, and prefers route ends before falling back to closed routes.
 
+Forward wear and widening remove short grass and ferns above the changed ground without drops. Tall grass and
+large ferns are cleared as a complete matching pair. Each cleared block receives the same protection checks as the
+ground, and a veto preserves the whole transition. Flowers, crops and other plants are retained; step counters and
+natural decay do not clear vegetation.
+
 Before a player-caused material transition, Trails fires a cancellable `EntityChangeBlockEvent` with the exact target
 material. By default it follows with a compatibility `BlockPlaceEvent` for claim plugins that only guard conventional
 building; this probe can be disabled under `integrations.protection-events` if a server has an incompatible observer.
@@ -177,7 +182,7 @@ Build the contract and its sources with `./gradlew apiJar apiSourcesJar`;
 For a focused change, run the relevant unit test explicitly, for example
 `./gradlew test --tests '*TrailsConfigurationTest' shadowJar`. Full coverage and artifact
 verification are opt-in with `./gradlew clean check shadowJar`; the deployable
-JAR is written to `build/libs/Trails-2.3.18.jar`.
+JAR is written to `build/libs/Trails-2.3.21.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven

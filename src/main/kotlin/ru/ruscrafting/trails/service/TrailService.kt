@@ -4,6 +4,8 @@ import org.bukkit.Chunk
 import org.bukkit.Material
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
+import org.bukkit.block.BlockState
+import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.BlockData
 import org.bukkit.entity.Player
 import ru.ruscrafting.trails.domain.DecayDecision
@@ -84,8 +86,10 @@ class TrailService(
             }
             is ProgressDecision.Advanced -> {
                 val material = Material.valueOf(decision.to.material)
-                if (!canChange(context.block, material)) return TrailWalkResult.NoChange
-                changeMaterial(player.name, context.block, material)
+                val clearance = trailClearance(context.block)
+                if (!canChange(context.block, material) || clearance.any { !canChange(it.block, Material.AIR) })
+                    return TrailWalkResult.NoChange
+                changeMaterial(player.name, context.block, material, clearance)
                 store.write(context.block, TrailBlockState(decision.to.identity, 0))
                 recordActivity(context.block)
                 TrailWalkResult.Advanced(decision.from, decision.to)
@@ -288,16 +292,17 @@ class TrailService(
             }
         }
         val target = Material.valueOf(previous.material)
+        val clearance = shoulders.associateWith(::trailClearance)
         if (shoulders.any { shoulder ->
                 store.read(shoulder) != null ||
                     catalog.resolve(shoulder.type.name, null, environmentOf(shoulder))?.trailName != terminal.trailName ||
-                    !canChange(shoulder, target)
+                    !canChange(shoulder, target) || clearance.getValue(shoulder).any { !canChange(it.block, Material.AIR) }
             }
         ) {
             return emptyList()
         }
         shoulders.forEach { shoulder ->
-            changeMaterial(actor, shoulder, target)
+            changeMaterial(actor, shoulder, target, clearance.getValue(shoulder))
             store.write(shoulder, TrailBlockState(previous.identity, 0))
             recordActivity(shoulder)
         }
@@ -312,11 +317,27 @@ class TrailService(
     private fun chunkKey(block: Block): Long = ((block.x shr 4).toLong() and 0xffff_ffffL) or ((block.z shr 4).toLong() shl 32)
     private fun position(block: Block): Int = TrailBlockPosition.pack(block.x and 15, block.y, block.z and 15)
 
-    private fun changeMaterial(actor: String, block: Block, material: Material) {
+    /** Natural wear clears grass and ferns only; the road builder owns its broader obstruction policy. */
+    private fun trailClearance(ground: Block): List<BlockState> {
+        if (ground.y + 1 >= ground.world.maxHeight) return emptyList()
+        val lower = ground.getRelative(BlockFace.UP)
+        if (lower.type in setOf(Material.SHORT_GRASS, Material.FERN)) return listOf(lower.state)
+        if (lower.type !in setOf(Material.TALL_GRASS, Material.LARGE_FERN) ||
+            (lower.blockData as? Bisected)?.half != Bisected.Half.BOTTOM || lower.y + 1 >= lower.world.maxHeight)
+            return emptyList()
+        val upper = lower.getRelative(BlockFace.UP)
+        if (upper.type != lower.type || (upper.blockData as? Bisected)?.half != Bisected.Half.TOP) return emptyList()
+        return listOf(upper.state, lower.state)
+    }
+
+    private fun changeMaterial(actor: String, block: Block, material: Material, clearance: List<BlockState> = emptyList()) {
         val before = block.state
         block.setType(material, false)
         val after = block.state
         observer.changed(actor, before, after)
+        if (clearance.isNotEmpty() && block.type == material && clearance.all { it.block.blockData.asString == it.blockData.asString }) {
+            clearance.forEach { changeMaterial(actor, it.block, Material.AIR) }
+        }
     }
 
     private fun changeBlockData(actor: String, block: Block, blockData: BlockData) {

@@ -8,6 +8,9 @@ import io.mockk.mockk
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.block.Biome
+import org.bukkit.block.Block
+import org.bukkit.block.BlockFace
+import org.bukkit.block.data.Bisected
 import org.bukkit.entity.Player
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -24,6 +27,106 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 
 class TrailsFootTrafficIntegrationTest : FunSpec({
+    for (route in listOf("player", "npc")) for (plant in listOf(Material.SHORT_GRASS, Material.FERN, Material.TALL_GRASS, Material.LARGE_FERN)) {
+        test("$route wear clears $plant completely only after the ground transition and gives no drops") {
+            trafficScenario { h ->
+                val lower = h.ground.getRelative(BlockFace.UP)
+                val upper = lower.getRelative(BlockFace.UP)
+                lower.type = plant
+                val tall = plant == Material.TALL_GRASS || plant == Material.LARGE_FERN
+                if (tall) {
+                    setTallPlantHalf(lower, plant, Bisected.Half.BOTTOM)
+                    setTallPlantHalf(upper, plant, Bisected.Half.TOP)
+                }
+                val entities = h.world.entities.map { it.uniqueId }.toSet()
+                val checked = mutableListOf<Int>()
+                h.server.pluginManager.registerEvent(EntityChangeBlockEvent::class.java, object : Listener {}, EventPriority.NORMAL,
+                    { _, raw ->
+                        val event = raw as EntityChangeBlockEvent
+                        if (event.to == Material.AIR) {
+                            event.entity shouldBe h.authority
+                            h.ground.type shouldBe Material.GRASS_BLOCK
+                            checked += event.block.y
+                        }
+                    }, h.plugin)
+                h.plugin.awaitTrailData(h.ground.chunk).awaitTrails(h.server)
+                repeat(4) {
+                    h.wear(route)
+                    h.ground.type shouldBe Material.GRASS_BLOCK
+                    lower.type shouldBe plant
+                    if (tall) upper.type shouldBe plant
+                }
+                checked shouldBe emptyList()
+                h.wear(route)
+                h.ground.type shouldBe Material.DIRT
+                lower.type shouldBe Material.AIR
+                upper.type shouldBe Material.AIR
+                checked.toSet() shouldBe if (tall) setOf(65, 66) else setOf(65)
+                h.world.entities.map { it.uniqueId }.toSet() shouldBe entities
+                h.plugin.inspectTrail(h.ground)?.identity?.serialize() shouldBe "DirtPath:1"
+            }
+        }
+    }
+
+    for (route in listOf("player", "npc")) for (veto in listOf("entity", "canBuild")) {
+        test("$route wear preserves the ground and both tall grass halves when the upper $veto probe is denied") {
+            trafficScenario { h ->
+                val lower = h.ground.getRelative(BlockFace.UP)
+                val upper = lower.getRelative(BlockFace.UP)
+                setTallPlantHalf(lower, Material.TALL_GRASS, Bisected.Half.BOTTOM)
+                setTallPlantHalf(upper, Material.TALL_GRASS, Bisected.Half.TOP)
+                h.server.pluginManager.registerEvent(EntityChangeBlockEvent::class.java, object : Listener {}, EventPriority.NORMAL,
+                    { _, raw ->
+                        val event = raw as EntityChangeBlockEvent
+                        if (veto == "entity" && event.block == upper && event.to == Material.AIR) event.isCancelled = true
+                    }, h.plugin)
+                h.server.pluginManager.registerEvent(BlockPlaceEvent::class.java, object : Listener {}, EventPriority.NORMAL,
+                    { _, raw ->
+                        val event = raw as BlockPlaceEvent
+                        if (veto == "canBuild" && event.block == upper) event.setBuild(false)
+                    }, h.plugin)
+                h.plugin.awaitTrailData(h.ground.chunk).awaitTrails(h.server)
+                repeat(5) { h.wear(route) }
+                h.ground.type shouldBe Material.GRASS_BLOCK
+                lower.type shouldBe Material.TALL_GRASS
+                upper.type shouldBe Material.TALL_GRASS
+                (lower.blockData as Bisected).half shouldBe Bisected.Half.BOTTOM
+                (upper.blockData as Bisected).half shouldBe Bisected.Half.TOP
+                h.plugin.inspectTrail(h.ground)?.walks shouldBe 4
+            }
+        }
+    }
+
+    for (plant in listOf(Material.WHEAT, Material.POPPY)) test("natural trail wear preserves $plant rather than applying the broader road clearance list") {
+        trafficScenario { h ->
+            val above = h.ground.getRelative(BlockFace.UP).also { it.type = plant }
+            h.plugin.awaitTrailData(h.ground.chunk).awaitTrails(h.server)
+            repeat(5) { h.wear("player") }
+            h.ground.type shouldBe Material.DIRT
+            above.type shouldBe plant
+        }
+    }
+
+    test("the advance tool shares vegetation cleanup and keeps an unmatched tall plant half") {
+        trafficScenario { h ->
+            val above = h.ground.getRelative(BlockFace.UP).also { it.type = Material.SHORT_GRASS }
+            h.plugin.awaitTrailData(h.ground.chunk).awaitTrails(h.server)
+            h.plugin.forceTrail(h.authority, h.ground)
+            h.ground.type shouldBe Material.DIRT
+            above.type shouldBe Material.AIR
+            setTallPlantHalf(above, Material.TALL_GRASS, Bisected.Half.BOTTOM)
+            val flower = above.getRelative(BlockFace.UP).also { it.type = Material.POPPY }
+            h.plugin.forceTrail(h.authority, h.ground)
+            h.ground.type shouldBe Material.COARSE_DIRT
+            above.type shouldBe Material.TALL_GRASS
+            flower.type shouldBe Material.POPPY
+            h.plugin.forceTrail(h.authority, h.ground)
+            h.ground.type shouldBe Material.DIRT_PATH
+            above.type shouldBe Material.TALL_GRASS
+            flower.type shouldBe Material.POPPY
+        }
+    }
+
     test("packet-only actors use ordinary progression without spawning a native entity") {
         trafficScenario { h ->
             val entities = h.world.entities.map { it.uniqueId }.toSet()
@@ -206,6 +309,17 @@ class TrailsFootTrafficIntegrationTest : FunSpec({
     }
 })
 
+private fun setTallPlantHalf(block: Block, material: Material, half: Bisected.Half) {
+    // MockBukkit's direct setBlockData leaves its stored BlockState stale; update publishes both native views.
+    val state = block.state
+    state.type = material
+    state.blockData = (material.createBlockData() as Bisected).also { it.half = half }
+    state.update(true, false) shouldBe true
+    block.type shouldBe material
+    (block.blockData as Bisected).half shouldBe half
+    (block.state.blockData as Bisected).half shouldBe half
+}
+
 private fun trafficScenario(block: (FootTrafficScenario) -> Unit) {
     MockBukkitTestRuntime.open().use { runtime ->
         val h = FootTrafficScenario(runtime)
@@ -252,6 +366,10 @@ private class FootTrafficScenario(runtime: MockBukkitTestRuntime) : AutoCloseabl
         val to = if (reverse) from() else to()
         position = to.clone()
         return service.recordStep(npc, authority, from, to).toCompletableFuture()
+    }
+
+    fun wear(route: String) {
+        if (route == "npc") step().awaitTrails(server) else plugin.handleMovement(authority, ground)
     }
 
     fun virtualStep(reverse: Boolean = false): CompletableFuture<StepResult> {
