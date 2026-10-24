@@ -189,7 +189,7 @@ Repeated registration preserves existing counters; journal flushing remains asyn
 For a focused change, run the relevant unit test explicitly, for example
 `./gradlew test --tests '*TrailsConfigurationTest' shadowJar`. Full coverage and artifact
 verification are opt-in with `./gradlew clean check shadowJar`; the deployable
-JAR is written to `build/libs/Trails-2.3.21.jar`.
+JAR is written to `build/libs/Trails-2.3.22.jar`.
 
 The Gradle wrapper is pinned to 9.6.1 with official distribution and wrapper checksums. Dependency and plugin versions
 are centralized in `gradle/libs.versions.toml`, resolved versions are committed in Gradle lock files, and Maven
