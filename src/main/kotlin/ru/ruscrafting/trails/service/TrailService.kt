@@ -7,6 +7,7 @@ import org.bukkit.block.BlockFace
 import org.bukkit.block.BlockState
 import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.BlockData
+import org.bukkit.block.data.type.Stairs
 import org.bukkit.entity.Player
 import ru.ruscrafting.trails.domain.DecayDecision
 import ru.ruscrafting.trails.domain.ProgressDecision
@@ -158,7 +159,27 @@ class TrailService(
     }
 
     fun speedMultiplier(context: TrailMovementContext, onlyTrackedTrails: Boolean): Double =
-        if (onlyTrackedTrails && context.stored == null) 1.0 else context.stage?.speedMultiplier ?: 1.0
+        if (onlyTrackedTrails && context.stored == null) 1.0 else
+            (context.stage ?: context.stored?.let { roadStairStage(context.block, it.identity) })?.speedMultiplier ?: 1.0
+
+    /** Metadata registration never replaces the caller's accepted road or resets its wear. */
+    fun registerSurface(block: Block): Boolean {
+        val previous = store.read(block)
+        val stage = catalog.resolve(block.type.name, previous?.identity, environmentOf(block))
+            ?: roadStairStage(block, previous?.identity) ?: return false
+        if (previous == null) store.write(block, TrailBlockState(stage.identity, 0))
+        recordActivity(block)
+        return true
+    }
+
+    private fun roadStairStage(block: Block, identity: ru.ruscrafting.trails.domain.TrailIdentity?): TrailStage? {
+        if (!block.type.name.endsWith("_STAIRS")) return null
+        val stairs = block.blockData as? Stairs ?: return null
+        if (stairs.half != Bisected.Half.BOTTOM || stairs.isWaterlogged) return null
+        val base = block.type.name.removeSuffix("_STAIRS")
+        val material = Material.matchMaterial(base) ?: Material.matchMaterial("${base}_PLANKS") ?: return null
+        return catalog.resolve(material.name, identity, environmentOf(block))
+    }
 
     fun canAffect(block: Block): Boolean = canAffect(movementContext(block))
 

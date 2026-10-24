@@ -75,6 +75,29 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
         return trailService.speedMultiplier(ground, settings.speedBoostOnlyTrails)
     }
 
+    override fun registerSurface(ground: Block): CompletionStage<Boolean> {
+        check(Bukkit.isPrimaryThread()) { "Trails surface registration requires the server thread" }
+        if (!ready || !settings.worldEnabled(ground.world.name) ||
+            !ground.world.isChunkLoaded(ground.x shr 4, ground.z shr 4)) return CompletableFuture.completedFuture(false)
+        val lifecycle = pluginRuntime ?: return CompletableFuture.completedFuture(false)
+        val store = blockStore
+        val service = trailService
+        val configuration = settings
+        val before = ground.blockData.asString
+        fun process(): Boolean = ready && pluginRuntime === lifecycle && blockStore === store &&
+            trailService === service && settings === configuration &&
+            ground.world.isChunkLoaded(ground.x shr 4, ground.z shr 4) && ground.blockData.asString == before &&
+            service.registerSurface(ground)
+        if (store.isSettled(ground.chunk)) return try { CompletableFuture.completedFuture(process()) }
+            catch (failure: Exception) { CompletableFuture.failedFuture(failure) }
+        val result = CompletableFuture<Boolean>()
+        val pending = store.whenReady(ground.chunk, store.mutationGuard(ground)) { result.complete(process()) }
+        pending.whenComplete { _, failure ->
+            if (failure == null) result.complete(false) else result.completeExceptionally(failure)
+        }
+        return result
+    }
+
     @Volatile
     lateinit var settings: TrailsSettings
         private set

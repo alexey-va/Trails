@@ -27,6 +27,61 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 
 class TrailsFootTrafficIntegrationTest : FunSpec({
+    test("registered road soil receives its configured speed immediately without changing blocks or wear counters") {
+        trafficScenario { h ->
+            h.ground.type = Material.COARSE_DIRT
+            val original = h.ground.blockData.asString
+            val speed = h.authority.walkSpeed
+            h.service.speedMultiplier(h.ground) shouldBe 1.0
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            h.ground.blockData.asString shouldBe original
+            h.service.speedMultiplier(h.ground) shouldBe 1.2
+            h.plugin.inspectTrail(h.ground)?.walks shouldBe 0
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            h.plugin.inspectTrail(h.ground)?.walks shouldBe 0
+            h.authority.walkSpeed shouldBe speed
+        }
+    }
+
+    test("surface registration preserves a worn road counter and ignores unsupported blocks or disabled worlds") {
+        trafficScenario { h ->
+            h.virtualStep().awaitTrails(h.server) shouldBe StepResult.COUNTED
+            val before = h.plugin.inspectTrail(h.ground)
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            h.plugin.inspectTrail(h.ground) shouldBe before
+            h.ground.type = Material.CHEST
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe false
+            h.ground.type shouldBe Material.CHEST
+            h.plugin.config.set("worlds.mode", "blocklist")
+            h.plugin.config.set("worlds.names", listOf(h.world.name))
+            h.plugin.saveConfig(); h.plugin.reloadTrails().awaitTrails(h.server)
+            h.ground.type = Material.COARSE_DIRT
+            h.service.registerSurface(h.ground).toCompletableFuture().join() shouldBe false
+        }
+    }
+
+    test("registered dry bottom road stairs inherit base material speed without changing their native state") {
+        trafficScenario { h ->
+            h.ground.type = Material.COBBLESTONE
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            val baseSpeed = h.service.speedMultiplier(h.ground)
+            (baseSpeed > 1.0) shouldBe true
+            h.ground.type = Material.COBBLESTONE_STAIRS
+            val stairs = h.ground.blockData as org.bukkit.block.data.type.Stairs
+            stairs.half = Bisected.Half.BOTTOM
+            stairs.isWaterlogged = false
+            h.ground.blockData = stairs
+            val original = stairs.asString
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            h.service.speedMultiplier(h.ground) shouldBe baseSpeed
+            h.ground.blockData.asString shouldBe original
+            stairs.isWaterlogged = true
+            h.ground.blockData = stairs
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe false
+            h.service.speedMultiplier(h.ground) shouldBe 1.0
+        }
+    }
+
     for (route in listOf("player", "npc")) for (plant in listOf(Material.SHORT_GRASS, Material.FERN, Material.TALL_GRASS, Material.LARGE_FERN)) {
         test("$route wear clears $plant completely only after the ground transition and gives no drops") {
             trafficScenario { h ->

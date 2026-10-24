@@ -175,6 +175,13 @@ The complete method contract is in
 Build the contract and its sources with `./gradlew apiJar apiSourcesJar`;
 `verifyPluginArtifact` also verifies that the API JAR and runtime contain identical Java contracts.
 
+From API 2.3.22, builders can call `registerSurface(Block)` after their own authorized
+road placement. It tracks the current configured stage without replacing the block,
+advancing wear, changing player preferences or supplying a custom speed. Dry bottom
+stairs inherit their base material's existing multiplier. The service never loads
+chunks and rejects a surface changed during asynchronous metadata preparation.
+Repeated registration preserves existing counters; journal flushing remains asynchronous.
+
 ```bash
 ./gradlew shadowJar
 ```

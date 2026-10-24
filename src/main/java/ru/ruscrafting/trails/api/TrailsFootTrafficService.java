@@ -21,6 +21,22 @@ public interface TrailsFootTrafficService {
     default double speedMultiplier(Block ground) { return 1.0; }
 
     /**
+     * Tracks an already placed road surface using its existing configured Trails stage.
+     * Call on the server thread after the caller has authorized and placed the block.
+     * This changes metadata only: no block replacement, item grant, walk counter advance,
+     * player setting or custom multiplier. Dry bottom stairs inherit their base material's
+     * configured speed without becoming ordinary trail-progression blocks.
+     *
+     * <p>Never loads chunks. Pending metadata preparation rechecks runtime, chunk and exact
+     * block state; a changed surface is ignored. Repeated registration preserves counters.
+     * Completion accepts metadata into the ordinary asynchronous chunk journal, not a disk flush.
+     * Returns false for unsupported surfaces, unavailable worlds or older providers.
+     */
+    default CompletionStage<Boolean> registerSurface(Block ground) {
+        return java.util.concurrent.CompletableFuture.completedFuture(false);
+    }
+
+    /**
      * Records one horizontal block crossing by a living entity carrying Citizens' {@code NPC}
      * metadata. Call on the server thread, once per observed step, with the actual before/after
      * coordinates; stationary samples, samples longer than 1.5 blocks, and destinations that do not
