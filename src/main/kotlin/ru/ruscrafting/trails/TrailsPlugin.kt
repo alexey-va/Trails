@@ -27,6 +27,7 @@ import ru.arc.core.BudgetedTaskQueue
 import ru.arc.core.whenCompleteSync
 import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.arc.paper.runtime.PaperPluginHotload
 import ru.arc.paper.api.ArcNativeCleanupService
 import ru.ruscrafting.trails.bukkit.RoadManager
 import ru.ruscrafting.trails.bukkit.RoadResult
@@ -123,7 +124,17 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     private var nativeQueue: BudgetedTaskQueue? = null
     private var cleanupService: ArcNativeCleanupService? = null
     private var nativeCleanupTail = CompletableFuture.completedFuture<Void>(null)
+    private var storageDrain = CompletableFuture.completedFuture(Unit)
     private var shutdownFailure: Throwable? = null
+    private val hotload = PaperPluginHotload(this) {
+        shutdownFailure = runCatching(::stopRuntime).exceptionOrNull()
+        linkedMapOf(
+            "storage" to storageDrain,
+            "native" to nativeCleanupTail,
+            "close" to (shutdownFailure?.let { CompletableFuture.failedFuture<Unit>(it) }
+                ?: CompletableFuture.completedFuture(Unit)),
+        )
+    }
     private var reloadInFlight: CompletableFuture<Result<Unit>>? = null
     private val movements = java.util.concurrent.ConcurrentHashMap<UUID, CompletableFuture<Unit>>()
     private val movementVersions = java.util.concurrent.ConcurrentHashMap<UUID, Long>()
@@ -138,8 +149,9 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     )
     private var ready = false
     internal fun isReady(): Boolean = ready
-    internal fun drained(): CompletableFuture<Unit> = shutdownFailure?.let { CompletableFuture.failedFuture(it) }
-        ?: nativeCleanupTail.thenApply<Unit> { }
+    internal fun drained(): CompletableFuture<Unit> = CompletableFuture.allOf(storageDrain, nativeCleanupTail,
+        shutdownFailure?.let { CompletableFuture.failedFuture<Unit>(it) } ?: CompletableFuture.completedFuture(Unit))
+        .thenApply<Unit> { }
     internal fun tasks() = requireNotNull(pluginRuntime) { "Trails is closed" }.tasks
     internal fun nativeWork() = requireNotNull(nativeQueue) { "Trails native work is closed" }
     internal fun nativeCleanup() = requireNotNull(cleanupService) { "ArcCore native cleanup service is unavailable" }
@@ -176,11 +188,17 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     }
 
     override fun onEnable() {
-        if (!nativeCleanupTail.isDone || nativeCleanupTail.isCompletedExceptionally) {
-            logger.severe("Previous Trails native cleanup is still pending or failed")
+        try {
+            hotload.beginGeneration()
+            hotload.register()
+        } catch (failure: Throwable) {
+            logger.log(java.util.logging.Level.SEVERE, "Trails startup refused: previous cleanup must finish successfully", failure)
             server.pluginManager.disablePlugin(this)
             return
         }
+        nativeCleanupTail = CompletableFuture.completedFuture(null)
+        storageDrain = CompletableFuture.completedFuture(Unit)
+        shutdownFailure = null
         val lifecycle = PaperPluginRuntime(this, "trails", BukkitTaskScheduler(this)).also {
             pluginRuntime = it
             it.start("version" to pluginMeta.version)
@@ -227,10 +245,7 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
             command.setExecutor(commandHandler)
             command.tabCompleter = commandHandler
             syncLocaleCommand()
-            lifecycle.own(AutoCloseable {
-                localeCommand?.unregister(server.commandMap)
-                localeCommand = null
-            })
+            lifecycle.own(AutoCloseable { unregisterLocaleCommand(localeCommand) })
 
             if (server.pluginManager.isPluginEnabled("PlaceholderAPI")) {
                 placeholderExpansion = TrailsPlaceholderExpansion(this).also {
@@ -264,6 +279,10 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     }
 
     override fun onDisable() {
+        try { hotload.prepare() } finally { hotload.close() }
+    }
+
+    private fun stopRuntime() {
         ready = false
         val lifecycle = pluginRuntime ?: return
         pluginRuntime = null
@@ -284,7 +303,7 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
             .getOrElse { CompletableFuture.failedFuture(it) }
         // Chunk/prefs futures are IO-only after cancellation; road cleanup needs future Main ticks.
         attempt {
-            if (::storage.isInitialized) storage.closeAsync {
+            if (::storage.isInitialized) storageDrain = storage.closeAsync {
                 var terminalFailure: Throwable? = null
                 fun closeResource(close: () -> Unit) {
                     try { close() } catch (error: Throwable) {
@@ -297,16 +316,21 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
                     closeResource { if (resource is PlayerPreferencesStore) resource.closeAsync().join() else resource.close() }
                 }
                 terminalFailure?.let { throw it }
-            }.join()
+            }
+            storageDrain.join()
         }
+        attempt { hotload.retireGameplayRegistrations() }
         shutdownFailure = failure
-        failure?.let { logger.severe("Could not close Trails storage: ${it.javaClass.simpleName}: ${it.message}") }
         cleanupService = null
         reloadInFlight = null
         movements.clear()
         movementVersions.clear()
         placeholderExpansion = null
         localeCommand = null
+        failure?.let {
+            logger.log(java.util.logging.Level.SEVERE, "Could not close every Trails resource", it)
+            throw it
+        }
     }
 
     fun reloadTrails(): CompletableFuture<Result<Unit>> {
@@ -1024,22 +1048,28 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     private fun syncLocaleCommand() {
         val requested = settings.commandAlias ?: "trails"
         if (requested == "trails" || requested == "paths") {
-            localeCommand?.unregister(server.commandMap)
-            localeCommand = null
+            unregisterLocaleCommand(localeCommand)
             return
         }
         if (localeCommand?.name == requested) return
 
         val candidate = LocaleCommand(requested, commandHandler)
         if (!server.commandMap.register("trails", candidate)) {
-            candidate.unregister(server.commandMap)
-            localeCommand?.unregister(server.commandMap)
-            localeCommand = null
+            unregisterLocaleCommand(candidate)
+            unregisterLocaleCommand(localeCommand)
             logger.warning("Locale command '$requested' conflicts with another plugin and was not registered")
             return
         }
-        localeCommand?.unregister(server.commandMap)
+        unregisterLocaleCommand(localeCommand)
         localeCommand = candidate
+    }
+
+    private fun unregisterLocaleCommand(command: Command?) {
+        if (command == null) return
+        if (localeCommand === command) localeCommand = null
+        val commands = server.commandMap.knownCommands
+        commands.entries.filter { it.value === command }.map { it.key }.forEach { commands.remove(it, command) }
+        command.unregister(server.commandMap)
     }
 
     private fun integrationSummary(): String {

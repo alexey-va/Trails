@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "2.3.22"
+version = "2.3.23"
 
 repositories {
     mavenCentral()
@@ -40,7 +40,7 @@ repositories {
 
 dependencies {
     compileOnly(libs.paper.api)
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.41")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.69")
 
     implementation(libs.bstats.bukkit)
     implementation(libs.arc.core.paper) {
@@ -57,7 +57,7 @@ dependencies {
     testImplementation(libs.kotest.assertions.core)
     testImplementation(libs.mockk)
     testImplementation(libs.arc.core.paper.testing)
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.41")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.69")
     testImplementation(libs.placeholder.api)
     testRuntimeOnly(libs.coreprotect)
     testRuntimeOnly(libs.junit.platform.launcher)
