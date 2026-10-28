@@ -96,6 +96,20 @@ class ChunkPersistentTrailStore internal constructor(
             !entry.tail.isCompletedExceptionally && settleForeign(entry)
     }
 
+    /** Only a live in-flight operation can reuse an accepted, separately invalidated surface read. */
+    internal fun hasPendingSpeedRead(chunk: Chunk): Boolean {
+        requirePrimaryThread()
+        val entry = cached(chunk)
+        return entry.states != null && !entry.tail.isCompletedExceptionally && !foreignBarrier.isCompletedExceptionally &&
+            (!entry.tail.isDone || !foreignBarrier.isDone || entry.foreignClearPending)
+    }
+
+    internal fun hasFailedSpeedRead(chunk: Chunk): Boolean {
+        requirePrimaryThread()
+        val entry = cached(chunk)
+        return entry.ready.isCompletedExceptionally || entry.tail.isCompletedExceptionally || foreignBarrier.isCompletedExceptionally
+    }
+
     override fun prepare(chunk: Chunk): CompletableFuture<Unit> {
         requirePrimaryThread()
         return cached(chunk).ready.copy()

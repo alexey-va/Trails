@@ -69,11 +69,33 @@ import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.atomic.LongAdder
 
 open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
+    private data class SurfaceSpeedKey(val world: UUID, val x: Int, val y: Int, val z: Int)
+    private data class AcceptedSurfaceSpeed(val store: ChunkPersistentTrailStore, val settings: TrailsSettings,
+        val blockData: String, val biome: NamespacedKey, val identity: ru.ruscrafting.trails.domain.TrailIdentity?,
+        val multiplier: Double)
+    // ponytail: retain at most 4096 accepted reads; eviction falls back to ordinary speed while pending.
+    private val acceptedSurfaceSpeeds = object : LinkedHashMap<SurfaceSpeedKey, AcceptedSurfaceSpeed>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<SurfaceSpeedKey, AcceptedSurfaceSpeed>?): Boolean = size > MAX_SURFACE_SPEED_READS
+    }
+    private fun surfaceSpeedKey(block: Block) = SurfaceSpeedKey(block.world.uid, block.x, block.y, block.z)
+
     override fun speedMultiplier(ground: org.bukkit.block.Block): Double {
         check(Bukkit.isPrimaryThread()) { "Trails surface speed requires the server thread" }
         if (!ready || !settings.worldEnabled(ground.world.name) ||
-            !ground.world.isChunkLoaded(ground.x shr 4, ground.z shr 4) || !blockStore.isSettled(ground.chunk)) return 1.0
-        return trailService.speedMultiplier(ground, settings.speedBoostOnlyTrails)
+            !ground.world.isChunkLoaded(ground.x shr 4, ground.z shr 4) || blockStore.hasFailedSpeedRead(ground.chunk)) return 1.0
+        val key = surfaceSpeedKey(ground)
+        val data = ground.blockData.asString
+        val previous = acceptedSurfaceSpeeds[key]?.takeIf {
+            it.store === blockStore && it.settings === settings && it.blockData == data && it.biome == ground.biome.key
+        }.also { if (it == null) acceptedSurfaceSpeeds.remove(key) }
+        if (!blockStore.isSettled(ground.chunk)) return previous?.takeIf {
+            blockStore.hasPendingSpeedRead(ground.chunk) && blockStore.read(ground)?.identity == it.identity
+        }?.multiplier ?: 1.0
+        val multiplier = trailService.speedMultiplier(ground, settings.speedBoostOnlyTrails)
+        if (multiplier > 1.0) acceptedSurfaceSpeeds[key] = AcceptedSurfaceSpeed(blockStore, settings, data,
+            ground.biome.key, blockStore.read(ground)?.identity, multiplier)
+        else acceptedSurfaceSpeeds.remove(key)
+        return multiplier
     }
 
     override fun registerSurface(ground: Block): CompletionStage<Boolean> {
@@ -665,6 +687,12 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
 
     fun <T : Any> clearTrailData(blocks: Collection<T>, blockOf: (T) -> Block): Boolean {
         if (!ready) return false
+        check(Bukkit.isPrimaryThread()) { "Trails surface invalidation requires the server thread" }
+        // Bound native position captures; normal construction batches keep unrelated accepted roads warm.
+        // Oversized events conservatively drop the cache before their resumable native/durable clear yields.
+        if (blocks.size <= MAX_SURFACE_SPEED_INVALIDATIONS) {
+            blocks.forEach { acceptedSurfaceSpeeds.remove(surfaceSpeedKey(blockOf(it))) }
+        } else acceptedSurfaceSpeeds.clear()
         return try {
             blockStore.clearForeign(blocks, blockOf)
             true
@@ -1114,6 +1142,8 @@ open class TrailsPlugin : JavaPlugin(), TrailsFootTrafficService {
     }
 
     private companion object {
+        const val MAX_SURFACE_SPEED_READS = 4096
+        const val MAX_SURFACE_SPEED_INVALIDATIONS = 128
         const val BSTATS_PLUGIN_ID = 16930
         const val HEALTH_REPORT_TICKS = 1_200L
         const val STORAGE_FLUSH_TICKS = 1L
