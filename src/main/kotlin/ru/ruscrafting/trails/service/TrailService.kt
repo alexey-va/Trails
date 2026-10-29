@@ -167,7 +167,8 @@ class TrailService(
         val previous = store.read(block)
         val stage = catalog.resolve(block.type.name, previous?.identity, environmentOf(block))
             ?: roadStairStage(block, previous?.identity) ?: return false
-        if (previous == null) store.write(block, TrailBlockState(stage.identity, 0))
+        if (previous != null) return true
+        store.write(block, TrailBlockState(stage.identity, 0))
         recordActivity(block)
         return true
     }
@@ -178,7 +179,9 @@ class TrailService(
         if (stairs.half != Bisected.Half.BOTTOM || stairs.isWaterlogged) return null
         val base = block.type.name.removeSuffix("_STAIRS")
         val material = Material.matchMaterial(base) ?: Material.matchMaterial("${base}_PLANKS") ?: return null
-        return catalog.resolve(material.name, identity, environmentOf(block))
+        val environment = environmentOf(block)
+        return catalog.resolve(material.name, identity, environment)
+            ?: if (material.name.endsWith("_PLANKS")) catalog.resolve(Material.COBBLESTONE.name, identity, environment) else null
     }
 
     fun canAffect(block: Block): Boolean = canAffect(movementContext(block))

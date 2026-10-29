@@ -25,7 +25,8 @@ public interface TrailsFootTrafficService {
      * Call on the server thread after the caller has authorized and placed the block.
      * This changes metadata only: no block replacement, item grant, walk counter advance,
      * player setting or custom multiplier. Dry bottom stairs inherit their base material's
-     * configured speed without becoming ordinary trail-progression blocks.
+     * configured speed without becoming ordinary trail-progression blocks. Registered wooden
+     * stairs without a configured wooden base stage use the configured cobblestone road stage.
      *
      * <p>Never loads chunks. Pending metadata preparation rechecks runtime, chunk and exact
      * block state; a changed surface is ignored. Repeated registration preserves counters.

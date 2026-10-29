@@ -364,6 +364,73 @@ class TrailsFootTrafficIntegrationTest : FunSpec({
     }
 })
 
+class TrailsRegisteredWoodStairsTest : FunSpec({
+    for (material in listOf(Material.OAK_STAIRS, Material.SPRUCE_STAIRS, Material.DARK_OAK_STAIRS))
+    test("registered $material inherits the configured plains cobblestone speed without changing its native state") {
+        trafficScenario { h ->
+            val cobblestone = h.world.getBlockAt(2, 64, 0).also {
+                it.type = Material.COBBLESTONE
+                it.biome = Biome.PLAINS
+            }
+            h.service.registerSurface(cobblestone).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            val roadSpeed = h.service.speedMultiplier(cobblestone)
+            roadSpeed shouldBe 1.25
+            h.ground.type = material
+            h.ground.biome = Biome.PLAINS
+            val stairs = (h.ground.blockData as org.bukkit.block.data.type.Stairs).also {
+                it.half = Bisected.Half.BOTTOM
+                it.isWaterlogged = false
+            }
+            h.ground.blockData = stairs
+            val before = h.ground.blockData.asString
+            h.service.speedMultiplier(h.ground) shouldBe 1.0
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            h.service.speedMultiplier(h.ground) shouldBe roadSpeed
+            h.plugin.inspectTrail(h.ground)?.walks shouldBe 0
+            h.ground.blockData.asString shouldBe before
+            h.plugin.handleMovement(h.authority, h.ground)
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            h.plugin.inspectTrail(h.ground)?.walks shouldBe 0
+            h.ground.blockData.asString shouldBe before
+
+            val ordinary = h.world.getBlockAt(3, 64, 0).also {
+                it.blockData = stairs
+                it.biome = Biome.PLAINS
+            }
+            h.service.speedMultiplier(ordinary) shouldBe 1.0
+            ordinary.type = Material.valueOf(material.name.removeSuffix("_STAIRS") + "_PLANKS")
+            h.service.speedMultiplier(ordinary) shouldBe 1.0
+            stairs.half = Bisected.Half.TOP
+            h.ground.blockData = stairs
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe false
+            h.service.speedMultiplier(h.ground) shouldBe 1.0
+            stairs.half = Bisected.Half.BOTTOM
+            stairs.isWaterlogged = true
+            h.ground.blockData = stairs
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe false
+            h.service.speedMultiplier(h.ground) shouldBe 1.0
+        }
+    }
+
+    test("an explicit wooden base stage takes precedence over the registered cobblestone fallback") {
+        trafficScenario { h ->
+            h.plugin.dataFolder.resolve("trails.yml").appendText("""
+
+  WoodenRoad:
+    stages:
+      - material: SPRUCE_PLANKS
+        speed-multiplier: 1.6
+""")
+            h.plugin.reloadTrails().awaitTrails(h.server)
+            h.ground.type = Material.SPRUCE_STAIRS
+            h.ground.biome = Biome.PLAINS
+            h.service.registerSurface(h.ground).toCompletableFuture().awaitTrails(h.server) shouldBe true
+            h.service.speedMultiplier(h.ground) shouldBe 1.6
+            h.plugin.inspectTrail(h.ground)?.identity?.serialize() shouldBe "WoodenRoad:0"
+        }
+    }
+})
+
 private fun setTallPlantHalf(block: Block, material: Material, half: Bisected.Half) {
     // MockBukkit's direct setBlockData leaves its stored BlockState stale; update publishes both native views.
     val state = block.state

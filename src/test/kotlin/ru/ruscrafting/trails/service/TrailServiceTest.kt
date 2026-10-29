@@ -308,6 +308,28 @@ class TrailServiceTest :
     }
 }
 
+class TrailRegistrationIdempotenceTest : FreeSpec({
+    "repeated road registration preserves its existing wear and idle timestamp" {
+        val world = mockk<World>()
+        every { world.uid } returns UUID.randomUUID()
+        val block = mockk<Block>(relaxed = true)
+        every { block.world } returns world
+        every { block.type } returns Material.COBBLESTONE
+        val store = InMemoryTrailBlockStore()
+        var now = 1_000L
+        val stage = TrailStage("Road", 0, "COBBLESTONE", 1, 100.0, 1.25)
+        val service = TrailService(TrailCatalog(listOf(TrailDefinition("Road", listOf(stage))), strictLinks = false),
+            store, currentTimeMillis = { now }, environmentOf = { TrailEnvironment("world", "minecraft:plains") })
+        service.registerSurface(block) shouldBe true
+        service.lastActivityMillis(block) shouldBe 1_000L
+        store.write(block, TrailBlockState(stage.identity, 7))
+        now = 2_000L
+        service.registerSurface(block) shouldBe true
+        service.lastActivityMillis(block) shouldBe 1_000L
+        store.read(block) shouldBe TrailBlockState(stage.identity, 7)
+    }
+})
+
 private class InMemoryTrailBlockStore : TrailBlockStore {
     private val values = mutableMapOf<Block, TrailBlockState>()
     var readCount = 0
