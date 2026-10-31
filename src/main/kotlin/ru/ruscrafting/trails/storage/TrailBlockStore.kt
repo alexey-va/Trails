@@ -68,12 +68,13 @@ class ChunkPersistentTrailStore internal constructor(
     private var dirtyQueue = linkedSetOf<ChunkId>()
     private var loadedAfterStart = mutableSetOf<ChunkId>()
     private val retired = ConcurrentHashMap<ChunkId, CachedChunk>()
-    private val failedFlushes = ConcurrentHashMap.newKeySet<ChunkId>()
+    private val failedFlushes = ConcurrentHashMap<ChunkId, Long>()
     private val cachedChunks = AtomicInteger()
     private val dirtyChunks = AtomicInteger()
     private val durabilityPendingChunks = AtomicInteger()
     private val corruptChunks = AtomicInteger()
     private val closed = AtomicBoolean()
+    private val maintenancePending = AtomicBoolean()
     private val closeCompletion = CompletableFuture<Unit>()
     private val pendingOperations = AtomicInteger()
     private var pendingPositions = ConcurrentHashMap<PositionId, PendingPosition>()
@@ -390,19 +391,25 @@ class ChunkPersistentTrailStore internal constructor(
         return position?.let { it to nativeBlock(chunk, it) }
     }
 
-    /** Starts at most eight encodes; no map copy, codec or disk wait runs on Paper. */
+    /** Shares at most eight encode attempts between loaded and retired chunks; Paper never waits for I/O. */
     fun flushDirty(): Int {
         requirePrimaryThread()
         check(!closed.get()) { "trail block store is closed" }
         var started = 0
         dirtyQueue.take(8).forEach { id ->
             dirtyQueue.remove(id)
-            val entry = chunks[id] ?: return@forEach
-            if (flushDurably(entry)) started++
-            if (entry.dirty || entry.durabilityPending) dirtyQueue += id
+            val detached = retired[id]
+            val entry = chunks[id]
+            if (detached != null) {
+                if (persistDetached(detached)) started++
+            } else if (entry != null && flushDurably(entry)) started++
+            if (retired.containsKey(id) || entry?.dirty == true || entry?.durabilityPending == true) dirtyQueue += id
         }
-        codec.submit { asyncJournal.reap() }.whenComplete { _, error ->
-            if (error != null && !closed.get()) plugin.logger.severe("Trail journal maintenance failed: $error")
+        if (maintenancePending.compareAndSet(false, true)) {
+            codec.submit { asyncJournal.reap() }.whenComplete { _, error ->
+                maintenancePending.set(false)
+                if (error != null && !closed.get()) plugin.logger.severe("Trail journal maintenance failed: $error")
+            }
         }
         return started
     }
@@ -428,7 +435,7 @@ class ChunkPersistentTrailStore internal constructor(
         requirePrimaryThread()
         if (closed.get()) return
         val id = id(event.chunk)
-        if (id in failedFlushes || asyncJournal.load(id.worldId, id.chunkKey) != null || retired.containsKey(id)) {
+        if (failedFlushes.containsKey(id) || asyncJournal.load(id.worldId, id.chunkKey) != null || retired.containsKey(id)) {
             loadedAfterStart += id
             prepare(event.chunk)
         }
@@ -526,7 +533,7 @@ class ChunkPersistentTrailStore internal constructor(
                 if (error != null) {
                     entry.ready.completeExceptionally(error)
                     if (!closed.get() && entry.valid) {
-                        failedFlushes += id
+                        markFlushFailure(entry)
                         plugin.logger.severe("Could not prepare trail chunk $id: $error")
                     }
                 }
@@ -555,7 +562,7 @@ class ChunkPersistentTrailStore internal constructor(
                             corruptChunks.incrementAndGet()
                             corruptionSink(entry.chunk, requireNotNull(prepared.corruption))
                         }
-                        if (prepared.dirty) markDirty(entry) else failedFlushes.remove(entry.id)
+                        if (prepared.dirty) markDirty(entry) else clearFlushFailure(entry)
                         loadedAfterStart.remove(entry.id)
                         entry.ready.complete(Unit)
                         true
@@ -632,7 +639,7 @@ class ChunkPersistentTrailStore internal constructor(
                         entry.journalRevision.set(encoded.snapshot.persistedRevision)
                         persistence.write(entry.chunk, storageKey, encoded.snapshot.encodedStates.takeUnless { encoded.empty })
                         markPdcFlushed(entry)
-                        failedFlushes.remove(entry.id)
+                        clearFlushFailure(entry)
                     }
                 } catch (failure: Throwable) { recordFlushFailure(entry, failure) }
             }.whenComplete { _, _ -> entry.flushing.set(false) }
@@ -640,17 +647,22 @@ class ChunkPersistentTrailStore internal constructor(
         return true
     }
 
-    private fun persistDetached(entry: CachedChunk) {
+    private fun persistDetached(entry: CachedChunk): Boolean {
+        if (!entry.flushing.compareAndSet(false, true)) return false
         codec.submit {
             val encoded = requireNotNull(encodeStable(entry, foldRecovery = true)) { "detached trail revision changed" }
             asyncJournal.commit(encoded.snapshot)
         }.thenCompose { it }.whenComplete { _, error ->
-                if (error == null) retired.remove(entry.id, entry)
-                else {
-                    failedFlushes += entry.id
+            try {
+                if (error == null) {
+                    retired.remove(entry.id, entry)
+                    clearFlushFailure(entry)
+                } else if (markFlushFailure(entry)) {
                     plugin.logger.severe("Could not persist unloaded trail chunk ${entry.id}: $error")
                 }
-            }
+            } finally { entry.flushing.set(false) }
+        }
+        return true
     }
 
     private fun encodeStable(entry: CachedChunk, foldRecovery: Boolean = false): Encoded? {
@@ -686,12 +698,25 @@ class ChunkPersistentTrailStore internal constructor(
     }
 
     private fun recordFlushFailure(entry: CachedChunk, error: Throwable) {
-        if (failedFlushes.add(entry.id)) persistenceFailureSink(entry.chunk, error)
+        if (markFlushFailure(entry)) persistenceFailureSink(entry.chunk, error)
+    }
+
+    private fun markFlushFailure(entry: CachedChunk): Boolean {
+        var first = false
+        failedFlushes.compute(entry.id) { _, previous ->
+            first = previous == null
+            if (previous == null || previous < entry.sequence) entry.sequence else previous
+        }
+        return first
+    }
+
+    private fun clearFlushFailure(entry: CachedChunk) {
+        failedFlushes.computeIfPresent(entry.id) { _, previous -> previous.takeIf { it > entry.sequence } }
     }
 
     private fun evict(entry: CachedChunk) {
         if (chunks.remove(entry.id, entry)) {
-            dirtyQueue.remove(entry.id)
+            if (!retired.containsKey(entry.id)) dirtyQueue.remove(entry.id)
             loadedAfterStart.remove(entry.id)
             cachedChunks.decrementAndGet()
             if (entry.dirty) dirtyChunks.decrementAndGet()

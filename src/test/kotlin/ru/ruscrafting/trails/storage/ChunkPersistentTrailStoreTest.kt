@@ -95,6 +95,22 @@ class ChunkPersistentTrailStoreTest : FreeSpec({
         }
     }
 
+    "periodic flush coalesces maintenance while the codec worker is blocked" {
+        withStore { f ->
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            try {
+                repeat(40) { f.store.flushDirty() shouldBe 0 }
+                val unrelated = f.codec.submit {}
+                unrelated.isCompletedExceptionally shouldBe false
+                release.countDown()
+                f.finish(unrelated)
+            } finally { release.countDown() }
+        }
+    }
+
     "unload performs no native PDC mutation and retains the detached state in durable recovery" {
         withStore { f ->
             val block = f.block(3, 80, 5)
@@ -112,6 +128,143 @@ class ChunkPersistentTrailStoreTest : FreeSpec({
             f.store.onChunkLoad(ChunkLoadEvent(block.chunk, false))
             f.warm(block)
             f.store.read(block) shouldBe expected
+        }
+    }
+
+    "periodic flush retries unloaded snapshots after full codec admission within the shared eight chunk limit" {
+        withStore { f ->
+            val blocks = (0 until 12).map { f.block(it * 16, 64, 0) }
+            blocks.forEachIndexed { index, block ->
+                f.warm(block)
+                f.store.write(block, TrailBlockState(null, index + 1))
+            }
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val blocking = f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            val queued = List(32) { f.codec.submit {} }
+            try {
+                blocks.forEach { f.store.onChunkUnload(ChunkUnloadEvent(it.chunk, false)) }
+                f.store.cachedChunkCount() shouldBe 0
+                f.store.healthContribution().dependencies["chunk-pdc"] shouldBe false
+                f.journal.size() shouldBe 0
+                f.writes shouldBe 0
+                release.countDown()
+                f.finish(CompletableFuture.allOf(blocking, *queued.toTypedArray()))
+
+                f.store.flushDirty() shouldBe 8
+                f.await { f.journal.size() == 8 }
+                f.store.flushDirty() shouldBe 4
+                f.await { f.journal.size() == 12 && f.store.healthContribution().dependencies["chunk-pdc"] == true }
+                f.store.healthContribution().recoveryBacklog shouldBe 12
+                f.writes shouldBe 0
+                f.closeStore()
+                f.reopen()
+                blocks.forEachIndexed { index, block ->
+                    f.warm(block)
+                    f.store.read(block) shouldBe TrailBlockState(null, index + 1)
+                }
+            } finally { release.countDown() }
+        }
+    }
+
+    "retired retry success preserves a newer preparation failure for the same chunk" {
+        withStore { f ->
+            val block = f.block()
+            f.warm(block)
+            f.store.write(block, TrailBlockState(null, 9))
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val blocking = f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            val queued = List(32) { f.codec.submit {} }
+            try {
+                f.store.onChunkUnload(ChunkUnloadEvent(block.chunk, false))
+                val preparation = f.store.prepare(block.chunk)
+                f.await { preparation.isDone }
+                preparation.isCompletedExceptionally shouldBe true
+                release.countDown()
+                f.finish(CompletableFuture.allOf(blocking, *queued.toTypedArray()))
+                f.store.flushDirty() shouldBe 1
+                f.await { f.journal.size() == 1 }
+                f.finish(f.io.submit {})
+                f.store.healthContribution().dependencies["chunk-pdc"] shouldBe false
+
+                f.warm(block)
+                f.store.read(block) shouldBe TrailBlockState(null, 9)
+                f.store.flushDirty() shouldBe 1
+                f.await { f.writes == 1 }
+                f.store.healthContribution().dependencies["chunk-pdc"] shouldBe true
+            } finally { release.countDown() }
+        }
+    }
+
+    "shutdown drains a retired snapshot whose first codec admission was rejected" {
+        withStore { f ->
+            val block = f.block()
+            f.warm(block)
+            f.store.write(block, TrailBlockState(null, 9))
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            repeat(32) { f.codec.submit {} }
+            try {
+                f.store.onChunkUnload(ChunkUnloadEvent(block.chunk, false))
+                val closing = f.store.closeAsync()
+                closing.isDone shouldBe false
+                f.journal.size() shouldBe 0
+                release.countDown()
+                f.finish(closing)
+                f.closeStore()
+                f.reopen()
+                f.warm(block)
+                f.store.read(block) shouldBe TrailBlockState(null, 9)
+                f.writes shouldBe 0
+            } finally { release.countDown() }
+        }
+    }
+
+    "rejected preparation of an unloaded chunk retains recovery until the next real load" {
+        withStore { f ->
+            val block = f.block()
+            val chunk = block.chunk
+            val expected = TrailBlockState(TrailIdentity("DirtPath", 1), 9)
+            val encoded = TrailChunkCodec.encode(mapOf(TrailBlockPosition.pack(0, 64, 0) to expected))
+            f.journal.commit(TrailChunkSnapshot(f.world.uid, chunk.chunkKey, encoded))
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val blocking = f.codec.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            val queued = List(32) { f.codec.submit {} }
+            try {
+                val preparation = f.store.prepare(chunk)
+                f.await { preparation.isDone }
+                preparation.isCompletedExceptionally shouldBe true
+                f.store.onChunkUnload(ChunkUnloadEvent(chunk, false))
+                release.countDown()
+                f.finish(CompletableFuture.allOf(blocking, *queued.toTypedArray()))
+                repeat(40) { f.store.flushDirty() shouldBe 0 }
+                f.finish(f.codec.submit {})
+                f.store.cachedChunkCount() shouldBe 0
+                f.reads shouldBe 1
+                f.writes shouldBe 0
+                f.journal.load(f.world.uid, chunk.chunkKey)?.encodedStates?.contentEquals(encoded) shouldBe true
+                f.store.healthContribution().dependencies["chunk-pdc"] shouldBe false
+                f.store.healthContribution().recoveryBacklog shouldBe 1
+
+                f.store.onChunkLoad(ChunkLoadEvent(chunk, false))
+                f.warm(block)
+                f.store.read(block) shouldBe expected
+                f.store.healthContribution().dependencies["chunk-pdc"] shouldBe false
+                f.store.flushDirty() shouldBe 1
+                f.await { f.writes == 1 }
+                f.store.healthContribution().dependencies["chunk-pdc"] shouldBe true
+                f.store.onChunkUnload(ChunkUnloadEvent(chunk, true))
+                f.store.onChunkLoad(ChunkLoadEvent(chunk, false))
+                f.warm(block)
+                f.journal.size() shouldBe 0
+            } finally { release.countDown() }
         }
     }
 
@@ -184,6 +337,7 @@ class ChunkPersistentTrailStoreTest : FreeSpec({
                 f.store.flushDirty()
                 f.store.write(block, TrailBlockState(null, 9))
                 f.store.onChunkUnload(ChunkUnloadEvent(block.chunk, true))
+                repeat(8) { f.store.flushDirty() shouldBe 0 }
                 val closing = f.store.closeAsync()
                 closing.isDone shouldBe false
                 f.writes shouldBe 0
